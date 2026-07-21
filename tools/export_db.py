@@ -4,7 +4,7 @@ extension bundles: extension/data/riders.json and extension/data/teams.json.
 
 Usage:
     python3 -m venv .venv && .venv/bin/pip install openpyxl
-    .venv/bin/python tools/export_db.py "2026DB_Post Renewals v1.2.xlsm"
+    .venv/bin/python tools/export_db.py "2026DB_Transfers.xlsm"
 
 Rider IDs (CyclistID) are the stable identifiers used throughout the tool, so a
 new database drop keeps working as long as IDs are preserved.
@@ -12,7 +12,7 @@ new database drop keeps working as long as IDs are preserved.
 import sys, os, json, collections
 import openpyxl
 
-SRC = sys.argv[1] if len(sys.argv) > 1 else "2026DB_Post Renewals v1.2.xlsm"
+SRC = sys.argv[1] if len(sys.argv) > 1 else "2026DB_Transfers.xlsm"
 OUT = os.path.join(os.path.dirname(__file__), "..", "extension", "data")
 
 # Column indexes in the DYN_cyclist sheet (0-based).

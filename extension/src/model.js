@@ -202,6 +202,20 @@ export function parseDeal(opText) {
   return { teamA: blk.A, teamB: blk.B, isLoan };
 }
 
+// A deal thread can be a bidding war (the price escalates across posts as teams
+// out-bid each other). The winning deal is the one that moved the most money —
+// pick that post's terms rather than the opening proposal.
+export function winningDealText(posts) {
+  let best = '', bestFee = -1;
+  for (const p of posts || []) {
+    const d = parseDeal(p.text || '');
+    if (!d.teamA.name || !d.teamB.name) continue;
+    const fee = Math.max(d.teamA.moneyOut || 0, d.teamA.moneyIn || 0, d.teamB.moneyOut || 0, d.teamB.moneyIn || 0);
+    if (fee >= bestFee) { bestFee = fee; best = p.text; } // >= : a later re-post wins ties
+  }
+  return best || (posts?.[0]?.text || '');
+}
+
 // Your-perspective figures for a deal. wageOf(name) -> wage or null (unknown).
 // salaryDelta is null when any traded rider's wage is unknown (shows as n/a).
 export function dealFigures(opText, myTeam, wageOf) {
@@ -283,12 +297,18 @@ export function computeTotals({ faItems = [], deals = [], sacks = [], baseSalary
     if (!f.amILeading || !f.salary) continue;
     if (f.completed) S.faCompleted += f.salary; else S.faPending += f.salary;
   }
-  let transfer = 0, loan = 0;
+  const F = { transferC: 0, transferP: 0, loanC: 0, loanP: 0 };
   for (const d of deals) {
     const sa = num(d.salaryAdd);
-    if (d.isLoan) { d.completed ? (S.loanCompleted += sa) : (S.loanPending += sa); loan += num(d.loanFee); }
-    else { d.completed ? (S.transferCompleted += sa) : (S.transferPending += sa); transfer += num(d.transferFee); }
+    if (d.isLoan) {
+      d.completed ? (S.loanCompleted += sa) : (S.loanPending += sa);
+      d.completed ? (F.loanC += num(d.loanFee)) : (F.loanP += num(d.loanFee));
+    } else {
+      d.completed ? (S.transferCompleted += sa) : (S.transferPending += sa);
+      d.completed ? (F.transferC += num(d.transferFee)) : (F.transferP += num(d.transferFee));
+    }
   }
+  const transfer = F.transferC + F.transferP, loan = F.loanC + F.loanP;
   // Sacks only count when they're yours: they free wages and incur a fine.
   const mine = sacks.filter((s) => s.mine);
   const sackReduction = mine.reduce((x, s) => x + (s.wage || 0), 0);
@@ -297,10 +317,12 @@ export function computeTotals({ faItems = [], deals = [], sacks = [], baseSalary
   const projected = S.existing + S.faCompleted + S.faPending
     + S.transferCompleted + S.transferPending + S.loanCompleted + S.loanPending - sackReduction;
   const bud = num(budget), res = num(reserve);
-  const spend = transfer + loan + fines + res;
+  // The whole projected squad salary draws on the budget, alongside fees,
+  // fines and the reserve.
+  const spend = transfer + loan + fines + res + projected;
   return {
     salary: { ...S, sackReduction, projected, cap, over: cap > 0 && projected > cap },
-    budget: { transfer, loan, fines, reserve: res, spend, budget: bud, over: bud > 0 && spend > bud },
+    budget: { salary: projected, ...F, transfer, loan, fines, reserve: res, spend, budget: bud, over: bud > 0 && spend > bud },
   };
 }
 

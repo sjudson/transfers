@@ -86,32 +86,23 @@ export function parseThread(html) {
   const doc = parseDoc(html);
   const title = (doc.querySelector('.forum_thread_title')?.textContent || '').trim();
 
-  const authors = Array.from(doc.querySelectorAll('td.forum_thread_user_name a.profile-link'))
-    .map((a) => (a.textContent || '').trim());
-  const bodies = Array.from(doc.querySelectorAll('td.forum_thread_user_post'));
-  const postAnchors = Array.from(doc.querySelectorAll('a[id^="post_"]'))
-    .map((a) => a.id.replace('post_', ''));
-
-  // "Posted on DD-MM-YYYY HH:MM" stamps in document order
-  const stamps = [];
-  for (const d of doc.querySelectorAll('div.small')) {
-    const t = d.textContent || '';
-    if (/Posted on/i.test(t)) {
-      const m = STAMP_RE.exec(t);
-      stamps.push(m ? m[1] : null);
-    }
-  }
-
-  const n = Math.max(authors.length, bodies.length, stamps.length);
+  // Extract each post from its OWN DOM structure so author / date / body can't
+  // drift out of alignment. Layout per post is two rows:
+  //   row 1: td.forum_thread_user_name (author) + td.forum_thread_post_date
+  //          (contains the #N post_ anchor and a "Posted on DD-MM-YYYY HH:MM" div)
+  //   row 2: td.forum_thread_user_info + td.forum_thread_user_post (the body)
   const posts = [];
-  for (let i = 0; i < n; i++) {
-    const body = bodies[i];
-    posts.push({
-      postId: postAnchors[i] || String(i),
-      author: authors[i] || '',
-      stampStr: stamps[i] || null,
-      text: body ? normalizeText(body) : '',
-    });
+  for (const body of doc.querySelectorAll('td.forum_thread_user_post')) {
+    // walk back to the nearest header row (the one with the author cell)
+    let hdr = body.closest('tr')?.previousElementSibling || null;
+    while (hdr && !hdr.querySelector('.forum_thread_user_name')) hdr = hdr.previousElementSibling;
+    const author = hdr?.querySelector('a.profile-link')?.textContent.trim() || '';
+    const postId = (hdr?.querySelector('a[id^="post_"]')?.id || '').replace('post_', '') || String(posts.length);
+    let stampStr = null;
+    for (const d of (hdr ? hdr.querySelectorAll('.small') : [])) {
+      if (/Posted on/i.test(d.textContent || '')) { const m = STAMP_RE.exec(d.textContent); if (m) { stampStr = m[1]; break; } }
+    }
+    posts.push({ postId, author, stampStr, text: normalizeText(body) });
   }
 
   // pagination: distinct rowstart offsets present in the page

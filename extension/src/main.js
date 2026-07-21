@@ -11,7 +11,7 @@ import {
   riderFromThreadTitle,
 } from './ridersdb.js';
 import {
-  analyzeFreeAgentThread, faStatus, dailyUsage, computeTotals, dealFigures,
+  analyzeFreeAgentThread, faStatus, dailyUsage, computeTotals, dealFigures, winningDealText,
   openingMinFor, faThreadKind, fmtBand, dealType,
   JUNIOR_MIN, MIN_WAGE, DEAL_MS, FIRST_WINDOW_UTC, TRANSFER_CLOSE_UTC,
 } from './model.js';
@@ -22,7 +22,7 @@ const FA_FORUM = 396;   // [Man-Game] Transfers: Free Agents (default)
 const DEAL_FORUM = 397; // [Man-Game] Transfers: Deals (default)
 // Bump when the snapshot schema or parsing logic changes, so stale cached
 // snapshots are discarded and everything is re-read with the current code.
-const DATA_VERSION = 7;
+const DATA_VERSION = 9;
 
 // faForum/dealForum are configurable so the tool can be pointed at an old
 // season's forums for testing, or reused in future seasons, without a rebuild.
@@ -202,12 +202,14 @@ async function fetchDealThread(threadId) {
   const t = await fetchThreadPosts(threadId, cfg.refreshSec * 1000).catch(() => null);
   if (!t) return;
   const wageOf = (name) => { const r = riderByName(name); return r ? (r.w || 0) : null; };
-  const fig = dealFigures(t.posts[0]?.text || '', cfg.myTeam, wageOf);
-  // Anchor the 24h close to the opening post (when the deal was proposed).
-  // Deals confirm within a day of the OP, and this ignores later comments or
-  // re-posts that would otherwise wrongly "re-open" a long-completed deal.
-  const opStamp = parseForumStamp(t.posts[0]?.stampStr);
-  const lastPostUtc = opStamp ? stampToUtcMs(opStamp, offsetMin) : Date.now();
+  // Use the winning (highest-money) offer in a bidding-war thread, not the OP.
+  const fig = dealFigures(winningDealText(t.posts), cfg.myTeam, wageOf);
+  // Anchor the 24h close to the deal proposal: the EARLIEST post time. Deals
+  // confirm within a day of the OP, and using the minimum stamp ignores later
+  // comments/re-posts and is robust to a missing/garbled opening-post stamp.
+  let lastPostUtc = Infinity;
+  for (const p of t.posts) { const ps = parseForumStamp(p.stampStr); if (ps) { const u = stampToUtcMs(ps, offsetMin); if (u < lastPostUtc) lastPostUtc = u; } }
+  if (!isFinite(lastPostUtc)) lastPostUtc = Date.now();
   // Voided/cancelled deals: a later post declares it off (excluded from totals).
   const voided = t.posts.slice(1).some((p) => /\b(void(ed)?|cancell?ed)\b/i.test(p.text || ''));
   dealSnap.set(threadId, {

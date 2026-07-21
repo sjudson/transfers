@@ -161,9 +161,13 @@ console.log('\n[computeTotals: salary breakdown + budget + sacks]');
   // 1,000,000 + 120k + 50k + 80k − 20k − sacks(110k) = 1,120,000
   eq('projected salary', t.salary.projected, 1120000);
   eq('sack reduction (mine only)', t.salary.sackReduction, 110000);
-  // budget: transfer 250k + loan 30k + fines (1×60k + 2×50k)=160k + reserve 100k = 540k
+  // budget: transfer 250k (completed) + loan 30k (pending) + fines 160k + reserve 100k + projected salary 1,120k
   eq('sacking fines progressive', t.budget.fines, 160000);
-  eq('budget spend incl reserve', t.budget.spend, 540000);
+  eq('full projected salary against budget', t.budget.salary, 1120000);
+  eq('transfer fee completed', t.budget.transferC, 250000);
+  eq('transfer fee pending', t.budget.transferP, 0);
+  eq('loan fee pending', t.budget.loanP, 30000);
+  eq('projected budget spend', t.budget.spend, 1660000);
   const over = model.computeTotals({ faItems: [{ salary: 100000, amILeading: true, completed: false }], baseSalary: '1200000', cap: 1200000 });
   eq('salary over cap flagged', over.salary.over, true);
 }
@@ -179,6 +183,15 @@ console.log('\n[wage bands + deal types]');
   eq('swap', model.dealType(false, ['A'], ['B']), 'swap');
   eq('loan-in', model.dealType(true, ['A'], []), 'loan-in');
   eq('loan-out', model.dealType(true, [], ['B']), 'loan-out');
+  // bidding war: winning deal = highest money moved, not the opening post
+  const war = [
+    { text: 'Team A:Minions\nRider Out:Ziga\nMoney In:€70,000\nTeam B:Cervelo\nRider In:Ziga\nMoney Out:€70,000' },
+    { text: 'Team A:Minions\nRider Out:Ziga\nMoney In:€150,000\nTeam B:Lidl\nRider In:Ziga\nMoney Out:€150,000' },
+    { text: 'Team A:Minions\nRider Out:Ziga\nMoney In:€200,000\nTeam B:Cervelo\nRider In:Ziga\nMoney Out:€200,000' },
+  ];
+  const win = model.dealFigures(model.winningDealText(war), 'Cervelo', () => 90000);
+  eq('winning deal fee = 200k (Cervelo pays)', win.transferFee, 200000);
+  eq('winning buyer is me', win.involvesMe, true);
 }
 
 // ============================ parse real HTML ==============================

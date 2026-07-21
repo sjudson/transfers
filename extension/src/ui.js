@@ -133,8 +133,11 @@ function renderTotals(s) {
   $('sCap').textContent = fmtEuro(salary.cap);
   bar('sBar', salary.projected, salary.cap);
 
-  putMoney('bTransfer', budget.transfer);
-  putMoney('bLoan', budget.loan);
+  putMoney('bSalary', budget.salary);
+  putMoney('bTransferC', budget.transferC);
+  putMoney('bTransferP', budget.transferP);
+  putMoney('bLoanC', budget.loanC);
+  putMoney('bLoanP', budget.loanP);
   putMoney('bFines', budget.fines);
   putMoney('bReserve', budget.reserve);
   const spend = $('bSpend'); spend.textContent = ''; spend.append(blueEl(budget.spend));
