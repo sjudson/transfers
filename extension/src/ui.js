@@ -174,14 +174,22 @@ function renderUsage(s) {
   $('uBids').textContent = u.bidsToday;
   $('uRidersLeft').textContent = u.ridersLeft;
   $('uBidsLeft').textContent = u.bidsLeft;
+  renderTiming(s);
+}
+
+// Transfer-window open/close status. Before open → countdown; once open → green
+// "Opened"; once closed → red "Closed". Called every second by the ticker too.
+export function renderTiming(s) {
+  const open = $('uWindow'), close = $('uClose');
   if (s.nowUtc < s.firstWindowUtc) {
     $('windowLabel').textContent = 'Transfers open in';
-    $('uWindow').textContent = fmtDuration(s.firstWindowUtc - s.nowUtc);
+    open.textContent = fmtDuration(s.firstWindowUtc - s.nowUtc);
   } else {
-    $('windowLabel').textContent = 'Next window (00:00 BST) in';
-    $('uWindow').textContent = fmtDuration(u.nextWindowUtc - s.nowUtc);
+    $('windowLabel').textContent = 'Transfer window';
+    open.textContent = ''; open.append(badge('win-open', 'Opened'));
   }
-  $('uClose').textContent = s.nowUtc >= s.transferCloseUtc ? 'closed' : fmtDuration(s.transferCloseUtc - s.nowUtc);
+  if (s.nowUtc >= s.transferCloseUtc) { close.textContent = ''; close.append(badge('win-closed', 'Closed')); }
+  else close.textContent = fmtDuration(s.transferCloseUtc - s.nowUtc);
 }
 
 function stat(label, val) {

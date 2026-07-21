@@ -36,20 +36,31 @@ on the extension's card in `chrome://extensions`.
    These are the riders it will track for you (whether or not you've bid yet).
 4. **Deals**: any deal thread that mentions your team on the recent list shows
    up automatically. You can also paste a thread link to track one.
-5. Watch the **Committed** and **Bids this window** cards, and the tables.
+5. Watch the **Salary**, **Budget** and **Bids this window** cards, and the
+   Free agents / Deals / Sacks sections.
 
 Everything is stored **locally on your machine** (nothing is uploaded).
 
-### Reading the free-agents table
+### Reading a free-agent card
 
-| Column | Meaning |
+Each free agent is a two-line card. The **top line** shows the rider (with a
+`Jr` tag for juniors/stagiaires or a `Sacked` tag), their **Age / OVL / POT**,
+and the status — a **"closes in …"** countdown to the 48-hour no-bid deadline,
+which becomes **"Signed to …"** (green if you won them, purple if they went
+elsewhere) once it elapses. The **bottom line** shows:
+
+| Field | Meaning |
 |---|---|
 | Your bid | Highest bid you've placed in that thread |
 | Leading | Current highest **valid** bid |
-| Leader | **YOU** (green row) or the team that's ahead |
+| Leader | **YOU** (green) or the team that's ahead |
+| Current band | The wage/bid band (range) the price sits in |
 | Min next | The smallest legal bid you could place next |
-| Status | Live / Closing (<6h) / Sold |
-| Sold/last bid in | Countdown to the 48h no-bid deadline |
+
+**Deals** and **Sacks** have their own sections below, with fees, loan fees and
+salary read straight from the thread/database (shown as **n/a** when a traded
+rider isn't in the bundled database). Money coming back to you is green; totals
+are blue.
 
 All times are shown in **BST** (the timezone the transfer rules use). The tool
 auto-detects the forum's clock so this stays correct even if your forum profile
@@ -65,8 +76,12 @@ After an (itself) rate-limited initialization step to slowly build the current s
 
 ## Troubleshooting
 
-- **Red "not logged in" banner** → open the site, log in, come back and click
-  *Refresh now*. The transfer forums are hidden from logged-out visitors.
+- **Red "not logged in" banner** → open the site and log in; the tracker picks
+  it up on its next update. The transfer forums are hidden from logged-out
+  visitors.
+- **"Initializing" banner** on first use → it's doing a one-time read of the
+  transfer history in the background; the picture fills in over a couple of
+  minutes, then updates stay incremental.
 - **A shortlisted rider shows "no thread found"** → nobody has started that
   rider's `[Free Agent]` thread yet, or it's deep in the forum. It'll appear once
   the thread exists / becomes active.
@@ -89,11 +104,13 @@ extension/
   src/
     net.js             rate-limited + cached + conditional fetching
     parse.js           DOMParser: forum listings & thread posts
+    crawl.js           incremental listing crawl (high-water paging)
+    queue.js           persistent FIFO work queue (no-loss carryover)
     tz.js              BST normalisation (self-calibrating from the forum clock)
     ridersdb.js        rider/team lookups from the bundled snapshot
-    model.js           bid math, valid-bid reconstruction, 48h, commitments
+    model.js           bid math, valid-bid reconstruction, bands, deals, totals
     ui.js              rendering
-    main.js            controller + refresh loop
+    main.js            controller + paced worker (detect → chunked fetch → render)
     db.js              IndexedDB (config, HTTP cache, snapshots)
 test/run.mjs           jsdom test harness (node test/run.mjs)
 ```

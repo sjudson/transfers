@@ -433,9 +433,7 @@ function tick() {
   // keep the init banner count live between renders
   document.getElementById('initBanner').classList.toggle('hidden', !(s.init && s.init.active && s.config.myTeam));
   if (s.init) document.getElementById('initCount').textContent = s.init.scanned;
-  const win = s.nowUtc < s.firstWindowUtc ? s.firstWindowUtc - s.nowUtc : s.usage.nextWindowUtc - s.nowUtc;
-  document.getElementById('uWindow').textContent = fmtDuration(win);
-  document.getElementById('uClose').textContent = s.nowUtc >= s.transferCloseUtc ? 'closed' : fmtDuration(s.transferCloseUtc - s.nowUtc);
+  ui.renderTiming(s); // transfers open/close countdowns → Opened/Closed labels
   document.querySelectorAll('[data-win]').forEach((elm) => {
     const w = +elm.dataset.win;
     if (w) elm.textContent = fmtDuration(w - s.nowUtc);
