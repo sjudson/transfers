@@ -262,7 +262,7 @@ function renderDeals(s) {
 
   for (const d of s.deals) {
     const tr = el('tr');
-    if (d.involvesMe) tr.classList.add('lead'); // same green highlight as a leading FA
+    if (d.involvesMe && !d.voided) tr.classList.add('lead'); // green highlight for your live deals
     const th = el('td', 'thread');
     const a = el('a', null, d.title || `Thread ${d.threadId}`); a.href = THREAD_URL(d.threadId); a.target = '_blank';
     th.append(a);
