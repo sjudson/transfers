@@ -1,0 +1,7 @@
+.venv/
+node_modules/
+test/node_modules/
+test/package-lock.json
+research/samples/*.html
+*.log
+.DS_Store

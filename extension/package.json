@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "module",
+  "//": "Present only so the browser/Node treat src/*.js as ES modules. Not used at runtime by the extension."
+}

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ManGame Transfer Tracker</title>
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <h1>ManGame Transfer Tracker</h1>
+    </div>
+    <div class="status">
+      <span id="bstClock" class="pill" title="Current time in BST">—</span>
+      <span id="refreshInfo" class="pill" title="Automatic update countdown">next update in —</span>
+    </div>
+  </header>
+
+  <div id="loginWarn" class="banner warn hidden">
+    You don't appear to be logged into <b>pcmdaily.com</b>. Open pcmdaily.com, log in, then click <b>Refresh now</b>. This tool only reads the site while you're logged in.
+  </div>
+  <div id="setupWarn" class="banner info hidden">
+    Set your <b>team name</b> below to start tracking.
+  </div>
+  <div id="initBanner" class="banner init hidden">
+    <span class="spinner"></span>
+    <span><b>Initializing</b> — reading transfer history (<span id="initCount">0</span> threads read). This one-time catch-up runs in the background; after it, updates are incremental every 30s.</span>
+  </div>
+
+  <main>
+    <section class="cards">
+      <div class="card">
+        <h2>Salary</h2>
+        <div id="salaryRows"></div>
+        <div class="figrow total"><span>Projected squad salary</span><b id="sProj">—</b></div>
+        <div class="figrow sub"><span>Salary cap (<span id="sDiv">?</span>)</span><b id="sCap">—</b></div>
+        <div class="capbar"><div id="sBar"></div></div>
+      </div>
+      <div class="card">
+        <h2>Budget</h2>
+        <div class="figrow"><span>Transfer fees</span><b id="bTransfer">—</b></div>
+        <div class="figrow"><span>Loan fees</span><b id="bLoan">—</b></div>
+        <div class="figrow"><span>Sacking fines</span><b id="bFines">—</b></div>
+        <div class="figrow"><span>Reserve</span><b id="bReserve">—</b></div>
+        <div class="figrow total"><span>Total budget spend</span><b id="bSpend">—</b></div>
+        <div class="figrow sub"><span>Budget</span><b id="bBudget">—</b></div>
+        <div class="capbar"><div id="bBar"></div></div>
+      </div>
+      <div class="card">
+        <h2>Bids this window <small>(BST day)</small></h2>
+        <div class="figrow"><span>Different riders today</span><b><span id="uRiders">0</span> / 8</b></div>
+        <div class="figrow"><span>Total bids today</span><b><span id="uBids">0</span> / 20</b></div>
+        <div class="figrow sub"><span>Riders left</span><b id="uRidersLeft">8</b></div>
+        <div class="figrow sub"><span>Bids left</span><b id="uBidsLeft">20</b></div>
+        <div class="figrow"><span id="windowLabel">Next window (00:00 BST)</span><b id="uWindow">—</b></div>
+        <div class="figrow"><span>Transfers close in</span><b id="uClose">—</b></div>
+        <p class="note">Counts cover the free-agent threads you track below.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head" data-toggle="cfgBody">
+        <h2>Setup</h2><span class="chev">▸</span>
+      </div>
+      <div id="cfgBody" class="panel-body">
+        <div class="cfg-grid3">
+          <label>Your team name (type anything)
+            <input id="teamInput" list="teamList" placeholder="Start typing…" autocomplete="off" />
+            <datalist id="teamList"></datalist>
+          </label>
+          <label>Division (salary cap)
+            <select id="divisionSel">
+              <option value="auto">Auto (from database)</option>
+              <option value="PT">ProTour — €3.5M</option>
+              <option value="PCT">Pro Conti — €2.5M</option>
+              <option value="CT">Continental — €1.2M</option>
+            </select>
+          </label>
+          <label>Refresh every
+            <select id="refreshSel">
+              <option value="30">30 seconds</option>
+              <option value="60">60 seconds</option>
+              <option value="120">2 minutes</option>
+              <option value="300">5 minutes</option>
+            </select>
+          </label>
+        </div>
+        <div class="cfg-grid3 money-grid">
+          <label>Existing salary commitments (€)
+            <input id="baseSalaryInput" inputmode="numeric" placeholder="current squad wages" autocomplete="off" />
+          </label>
+          <label>Budget (€)
+            <input id="budgetInput" inputmode="numeric" placeholder="cash available" autocomplete="off" />
+          </label>
+          <label>Non-transfer reserve (€)
+            <input id="reserveInput" inputmode="numeric" placeholder="wildcards, training…" autocomplete="off" />
+          </label>
+        </div>
+        <p class="note">Existing salary is prefilled from the database when your team is in it; override it for older/other seasons. The reserve counts against your budget spend. Sacks you make reduce salary and add a fine to budget.</p>
+        <div class="shortlist-add">
+          <label>Add free agent to shortlist (from 2026 database)
+            <input id="riderSearch" placeholder="Search rider name…" autocomplete="off" />
+          </label>
+          <div id="riderResults" class="results"></div>
+        </div>
+        <div class="deal-add">
+          <label>Track a free-agent thread directly (paste URL or id)
+            <input id="faThreadInput" placeholder="https://pcmdaily.com/forum/viewthread.php?thread_id=…" autocomplete="off" />
+          </label>
+          <button id="faThreadAdd" class="btn">Add FA</button>
+        </div>
+        <div class="deal-add">
+          <label>Track a deal thread (paste pcmdaily thread URL or id)
+            <input id="dealInput" placeholder="https://pcmdaily.com/forum/viewthread.php?thread_id=…" autocomplete="off" />
+          </label>
+          <button id="dealAdd" class="btn">Add deal</button>
+        </div>
+        <details class="advanced">
+          <summary>Advanced: forum IDs</summary>
+          <div class="cfg-grid">
+            <label>Free-agents forum ID
+              <input id="faForumInput" inputmode="numeric" placeholder="396" />
+            </label>
+            <label>Deals forum ID
+              <input id="dealForumInput" inputmode="numeric" placeholder="397" />
+            </label>
+          </div>
+          <p class="note">Defaults 396 / 397 (this season). Point these at an old season's forums to test against real archived bid &amp; deal threads.</p>
+        </details>
+      </div>
+    </section>
+
+    <section>
+      <h2 class="section-title">Free agents <span id="faCount" class="count"></span></h2>
+      <div id="faList" class="fa-list"></div>
+      <p id="faEmpty" class="empty">No free agents tracked yet — they appear once you set your team, or add some in Setup above.</p>
+    </section>
+
+    <section>
+      <h2 class="section-title">Sacks <span id="sackCount" class="count"></span></h2>
+      <div id="sackList" class="fa-list"></div>
+      <p id="sackEmpty" class="empty">You haven't sacked anyone. [Sack] threads you post appear here and adjust your salary &amp; budget.</p>
+    </section>
+
+    <section>
+      <h2 class="section-title">Deals <span id="dealCount" class="count"></span></h2>
+      <div class="tablewrap">
+        <table id="dealTable">
+          <thead>
+            <tr>
+              <th>Thread</th><th>Type</th>
+              <th class="num">Transfer fee</th><th class="num">Loan fee</th><th class="num">Salary</th>
+              <th>Status</th><th></th><th></th>
+            </tr>
+          </thead>
+          <tbody id="dealBody"></tbody>
+        </table>
+      </div>
+      <p id="dealEmpty" class="empty">No deals tracked. Deals involving your team on the recent list appear here automatically; you can also add one above.</p>
+    </section>
+
+    <footer class="foot">
+      Read-only. Data cached locally (IndexedDB). Times shown in BST. Rider database: bundled snapshot.
+      <span id="tzInfo" class="subtle"></span>
+    </footer>
+  </main>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

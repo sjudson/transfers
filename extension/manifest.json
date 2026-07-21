@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "ManGame Transfer Tracker",
+  "version": "0.1.0",
+  "description": "Tracks your ManGame (pcmdaily.com) free-agent bids, shortlist, and deals. Read-only. Requires you to be logged into pcmdaily.com.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Open ManGame Transfer Tracker"
+  },
+  "background": {
+    "service_worker": "service_worker.js"
+  },
+  "host_permissions": [
+    "*://pcmdaily.com/*"
+  ],
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "tabs"
+  ]
+}
