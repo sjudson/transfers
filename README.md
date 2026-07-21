@@ -1,13 +1,10 @@
 # ManGame Transfer Tracker
 
-A Chrome/Chromium extension that watches the [pcmdaily.com](https://pcmdaily.com)
-ManGame transfer season for you: your free-agent bids, a shortlist you choose,
-and any deals your team is in. It shows who's leading, your minimum next bid,
-the 48-hour countdowns, your daily bid allowance, and your total committed
+A Chromium extension that watches the ManGame transfer season for you: your free-agent bids, a shortlist you choose, and any deals your team is in. It shows who's leading, your minimum next bid, the 48-hour countdowns, your daily bid allowance, and your total committed
 salary / transfer fees / loan fees **if you win everything you currently lead**.
 
-It is **read-only** — it never posts, edits, or changes anything on pcmdaily.
-It only reads pages while **you are logged into pcmdaily.com in the same
+It is **read-only** — it never posts, edits, or changes anything on the site.
+It only reads pages while **you are logged in to the site in the same
 browser**, and it reads them gently (see *How it stays gentle* below).
 
 ---
@@ -21,10 +18,9 @@ browser**, and it reads them gently (see *How it stays gentle* below).
 3. Turn on **Developer mode** (top-right toggle).
 4. Click **Load unpacked** and select the **`extension`** folder
    (the one containing `manifest.json`).
-5. A cycling-jersey icon appears in your toolbar. **Make sure you're logged into
-   pcmdaily.com**, then click the icon to open the tracker.
+5. A listing for the ManGame Transfer Tracker will appear in your extensions tab: **Make sure you're logged into the site**, then click the icon to open the tracker.
 
-That's it. To update later, replace the folder's files and click the ↻ button
+To update later, replace the folder's files and click the ↻ button
 on the extension's card in `chrome://extensions`.
 
 ---
@@ -32,15 +28,15 @@ on the extension's card in `chrome://extensions`.
 ## Using it
 
 1. **Set your team name** in *Setup* (start typing — it autocompletes from the
-   official database).
-2. **Add free agents to your shortlist** — search by name and click *Add*.
+   official 2026 database). The tool will use the database to prepopulate the
+   team-related fields, but you can also add numbers manually for things like
+   existing salary commitment, overall budget, and the amount you want to **reserve**
+   for things like training and wildcard bids.
+3. **Add free agents to your shortlist** — search by name and click *Add*.
    These are the riders it will track for you (whether or not you've bid yet).
-3. **Deals**: any deal thread that mentions your team on the recent list shows
-   up automatically. You can also paste a thread link to track one. Because deal
-   structures vary, type the **transfer fee / loan fee / salary change** for each
-   deal into the boxes — the tracker adds them into your totals. (It shows the €
-   figures it spotted in the thread as hints.)
-4. Watch the **Committed** and **Bids this window** cards, and the tables.
+4. **Deals**: any deal thread that mentions your team on the recent list shows
+   up automatically. You can also paste a thread link to track one.
+5. Watch the **Committed** and **Bids this window** cards, and the tables.
 
 Everything is stored **locally on your machine** (nothing is uploaded).
 
@@ -63,19 +59,13 @@ uses a different timezone.
 
 ## How it stays gentle on the server
 
-- It only runs **while the dashboard tab is open**.
-- It polls each forum's **first page** on your chosen interval (default 30s) and
-  **only re-reads a thread when its last-post time has actually changed**.
-- Every page is cached locally with a minimum time-to-live, unchanged pages come
-  back as tiny "304 Not Modified" replies, and there's a hard **4-second minimum
-  gap** between any two requests plus a per-refresh fetch budget.
-- The header shows how many upstream requests it has made this session.
+After an (itself) rate-limited initialization step to slowly build the current state of the forum, the update cycle is fixed to a minimum of 30s. **Reloading the page only resets this timer and slows down the update.** 
 
 ---
 
 ## Troubleshooting
 
-- **Red "not logged in" banner** → open pcmdaily.com, log in, come back and click
+- **Red "not logged in" banner** → open the site, log in, come back and click
   *Refresh now*. The transfer forums are hidden from logged-out visitors.
 - **A shortlisted rider shows "no thread found"** → nobody has started that
   rider's `[Free Agent]` thread yet, or it's deep in the forum. It'll appear once
