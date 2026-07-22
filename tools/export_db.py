@@ -62,7 +62,7 @@ def main():
         json.dump({"generatedFrom": os.path.basename(SRC), "count": len(riders),
                    "riders": riders}, f, ensure_ascii=False, separators=(",", ":"))
     # teams.json is a CURATED list of {n: name, d: division}. It carries teams
-    # that have no riders yet (new CT teams, the "(other)" TBA placeholder), and
+    # that have no riders yet (e.g. newly promoted/added CT teams), and
     # its divisions are authoritative (from the official teams thread). So MERGE
     # rather than overwrite: keep every existing entry as-is and only append DB
     # teams that aren't already present (matched by norm).

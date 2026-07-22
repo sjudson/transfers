@@ -26,9 +26,9 @@ export async function loadDb() {
     const k = norm(r.n);
     if (!BY_NAME.has(k)) BY_NAME.set(k, r);
   }
-  // teams.json entries are { n: name, d: division } ("(other)" = the
-  // unannounced/TBA placeholder). Division is authoritative here (from the
-  // official teams thread), covering new teams that have no riders yet.
+  // teams.json entries are { n: name, d: division }. Division is authoritative
+  // here (from the official teams thread), covering new teams that have no
+  // riders yet.
   TEAMS = tj.teams.map(({ n, d }) => ({ name: n, norm: norm(n), div: d }))
     .sort((a, b) => b.norm.length - a.norm.length);
   return { count: RIDERS.length, teams: TEAMS.length };
@@ -82,7 +82,6 @@ export function teamsInText(text) {
   const used = [];
   for (const t of TEAMS) {
     if (t.norm.length < 4) continue;
-    if (t.name === '(other)') continue; // placeholder — "other" is a common word
     if (nt.includes(' ' + t.norm + ' ') || nt.includes(t.norm)) {
       // avoid double-counting a shorter name contained in an already-found one
       if (!used.some((u) => u.includes(t.norm))) {

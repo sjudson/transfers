@@ -97,7 +97,7 @@ console.log('\n[minIncrement]');
 console.log('\n[ridersdb]');
 {
   const teams = rdb.allTeams();
-  ok('61 teams loaded (56 DB + 4 new CT + (other))', teams.length === 61, String(teams.length));
+  ok('61 teams loaded (56 DB + 5 new CT incl. Karthago)', teams.length === 61, String(teams.length));
   ok('allTeamsFull carries divisions', rdb.allTeamsFull().every((t) => t.name && t.div));
   eq('new CT team present with CT division', rdb.teamDivision('Billstedt-Horn'), 'CT');
   const aman = rdb.riderById(5);
