@@ -15,8 +15,18 @@
     <div class="status">
       <span id="bstClock" class="pill" title="Current time in BST">—</span>
       <span id="refreshInfo" class="pill" title="Automatic update countdown">next update in —</span>
+      <button id="adminBtn" class="btn ghost" title="Admin panel (access code required)">Admin</button>
     </div>
   </header>
+
+  <div id="adminTabs" class="tabs hidden">
+    <button id="tabTeam" class="tab active">My team</button>
+    <button id="tabAdmin" class="tab">Admin</button>
+  </div>
+
+  <div class="banner disclaimer">
+    This tool makes a best-effort for correctness, but it provides <b>NO GUARANTEES</b>. The forum on the site is authoritative, so always confirm any information the tool provides on the site itself.
+  </div>
 
   <div id="loginWarn" class="banner warn hidden">
     You don't appear to be logged into <b>pcmdaily.com</b>. Open pcmdaily.com, log in, then click <b>Refresh now</b>. This tool only reads the site while you're logged in.
@@ -29,7 +39,7 @@
     <span><b>Initializing</b> — reading transfer history (<span id="initCount">0</span> threads read). This one-time catch-up runs in the background; after it, updates are incremental every 30s.</span>
   </div>
 
-  <main>
+  <main id="mainPane">
     <section class="cards">
       <div class="card">
         <h2>Salary</h2>
@@ -59,7 +69,12 @@
         <div class="figrow sub"><span>Bids left</span><b id="uBidsLeft">20</b></div>
         <div class="figrow"><span id="windowLabel">Next window (00:00 BST)</span><b id="uWindow">—</b></div>
         <div class="figrow"><span>Transfers close in</span><b id="uClose">—</b></div>
-        <p class="note">Counts cover the free-agent threads you track below.</p>
+        <div class="figrow roster-head"><span>Roster <small id="rDiv"></small></span><b id="rSquad">—</b></div>
+        <div class="figrow sub"><span>Existing riders</span><b id="rExisting">—</b></div>
+        <div class="figrow sub"><span>Confirmed additions</span><b id="rConfirmed">—</b></div>
+        <div class="figrow sub"><span>Pending additions</span><b id="rPending">—</b></div>
+        <div class="figrow sub"><span>Departed</span><b id="rDeparted">—</b></div>
+        <p class="note"><sup>j</sup> = juniors (count as ½ toward the CT minimum). Counts cover the threads you track below.</p>
       </div>
     </section>
 
@@ -169,6 +184,21 @@
       <span id="tzInfo" class="subtle"></span>
     </footer>
   </main>
+
+  <div id="adminPane" class="hidden"></div>
+
+  <div id="adminModal" class="modal hidden">
+    <div class="modal-box">
+      <h2>Admin access</h2>
+      <p class="note">Enter your 64-character (256-bit) access code.</p>
+      <input id="adminCode" type="password" autocomplete="off" spellcheck="false" placeholder="access code" />
+      <div id="adminCodeErr" class="err"></div>
+      <div class="modal-actions">
+        <button id="adminCancel" class="btn ghost">Cancel</button>
+        <button id="adminGo" class="btn">Unlock</button>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="src/main.js"></script>
 </body>

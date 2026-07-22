@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <!-- Declared in manifest "sandbox.pages": opaque origin, no chrome.* access,
+       but permitted to eval. The decrypted admin bundle runs here; all data
+       arrives from the dashboard page via postMessage. -->
+  <style id="astyle"></style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="admin-sandbox.js"></script>
+</body>
+</html>

@@ -112,8 +112,42 @@ extension/
     ui.js              rendering
     main.js            controller + paced worker (detect → chunked fetch → render)
     db.js              IndexedDB (config, HTTP cache, snapshots)
+    admin-gate.js      access-code prompt + WebCrypto verify/decrypt + sandbox
+  admin-sandbox.html   sandboxed iframe that runs the decrypted admin bundle
+  admin.enc            encrypted admin panel (opaque; ships publicly)
+  admin-gate.json      verify hash + KDF params (public; no secret)
 test/run.mjs           jsdom test harness (node test/run.mjs)
 ```
 
 Regenerate the DB snapshot from a new `.xlsm` with the exporter in
 `tools/` (see that folder). Run tests: `cd test && npm i && node run.mjs`.
+
+---
+
+## Admins (access-code gated)
+
+Click **Admin** in the header and enter your 64-character (256-bit) access code.
+On success the tool decrypts the admin panel and shows a card per team — division,
+salary vs cap, projected roster counts (juniors count as ½ toward the CT minimum),
+and per-day bid usage — with **red** (committed over cap / over max roster / bid
+limit crossed), **orange** (over cap only if pending bids win), and **yellow**
+(under the roster minimum) alerts. Toggle between **My team** and **Admin** tabs.
+
+### Private admin source & release (this branch only — never push publicly)
+
+The loaded `extension/` folder is *always* the opaque artifact: it contains only
+`admin.enc` (the encrypted panel) + `admin-gate.json` (verify hash + KDF params) —
+never the cleartext admin logic. This branch additionally carries, at the repo root:
+
+- `admin-src/admin.js`, `admin-src/admin.css` — cleartext admin panel source.
+- `admin-secret.json` — the generated 256-bit access code + KDF params (**keep private**).
+- `tools/build_admin.mjs` — encrypts `admin-src/` → `extension/admin.enc` +
+  `admin-gate.json`. Run it after editing the admin source:
+  `node tools/build_admin.mjs` (prints the access code on first run when it
+  generates `admin-secret.json`).
+
+The **public release** = the `extension/` folder with `admin-src/` and
+`admin-secret.json` excluded. Crypto: `crypto.subtle` only — PBKDF2 verify,
+HKDF-SHA256 key (domain-separated), AES-256-GCM payload. This is obfuscation /
+gate-keeping, not defensible security: the access code is a 256-bit uniform secret,
+so without it there is only the ciphertext (2²⁵⁶ brute force).

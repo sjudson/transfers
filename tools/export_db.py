@@ -17,7 +17,7 @@ OUT = os.path.join(os.path.dirname(__file__), "..", "extension", "data")
 
 # Column indexes in the DYN_cyclist sheet (0-based).
 C = dict(id=0, last=1, first=2, team=17, div=19, country=20,
-         xl=22, xp=23, age=27, pot=28, ovl=29, wage=30, onloan=47)
+         xl=22, xp=23, age=27, pot=28, ovl=29, wage=30, junior=35, onloan=47)
 
 def main():
     wb = openpyxl.load_workbook(SRC, read_only=True, data_only=True)
@@ -42,6 +42,7 @@ def main():
             "o": round(r[C["ovl"]], 1) if isinstance(r[C["ovl"]], (int, float)) else None,
             "c": (r[C["country"]] or "").strip(),
             "loan": 1 if r[C["onloan"]] else 0,
+            "j": 1 if r[C["junior"]] else 0,
         })
         if not fa:
             teams[team] += 1

@@ -97,6 +97,17 @@ export function squadSalary(teamName) {
   return { salary: sum, count };
 }
 
+// Owned, active squad for a team (excludes loaned-out riders), split full/junior.
+export function squadRoster(teamName) {
+  const nt = norm(teamName);
+  let full = 0, jr = 0;
+  for (const r of RIDERS) {
+    if (norm(r.t) === nt && !r.loan) { if (r.j) jr++; else full++; }
+  }
+  return { full, jr };
+}
+export const juniorByName = (name) => !!(riderByName(name) && riderByName(name).j);
+
 export function divisionCap(div) {
   const d = (div || '').toUpperCase();
   if (d.startsWith('PT') || d === 'PT') return 3500000;

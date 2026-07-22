@@ -432,5 +432,91 @@ console.log('\n[queue: no-loss carryover]');
   eq('load preserves order', q3.take(3).join(','), 'a,b,c');
 }
 
+// ============ roster counts (junior ½, division min/max) ===================
+console.log('\n[rosterCounts]');
+{
+  const ct = model.rosterCounts('CT', { existing: { full: 14, jr: 2 }, pending: { full: 1, jr: 0 } });
+  eq('CT min-count = 14 + ½·2 = 15', ct.committed.minCount, 15);
+  eq('CT max-count = 14 + 2 = 16', ct.committed.maxCount, 16);
+  ok('CT not under min at 15', ct.underMin === false);
+  const pt = model.rosterCounts('PT', { existing: { full: 19, jr: 0 } });
+  ok('PT under min at 19 (<20)', pt.underMin === true);
+  const over = model.rosterCounts('CT', { existing: { full: 21, jr: 0 } });
+  ok('CT over max at 21 (>20)', over.overMax === true);
+}
+
+console.log('\n[junior 50k ceiling]');
+{
+  ok('junior at 20k counts as junior', model.countsAsJunior(true, 20000) === true);
+  ok('junior at exactly 50k still junior', model.countsAsJunior(true, 50000) === true);
+  ok('junior bid above 50k is promoted to full', model.countsAsJunior(true, 55000) === false);
+  ok('non-junior never counts as junior', model.countsAsJunior(false, 20000) === false);
+  ok('missing amount treated as 0 (junior)', model.countsAsJunior(true, null) === true);
+  // a CT team leading a [Junior] at 55k fills a FULL slot, not a half slot
+  const promoted = model.rosterCounts('CT', {
+    existing: { full: 14, jr: 0 },
+    pending: model.countsAsJunior(true, 55000) ? { full: 0, jr: 1 } : { full: 1, jr: 0 },
+  });
+  eq('promoted junior adds a full projected slot', promoted.projected.minCount, 15);
+}
+
+// ============ admin gate crypto round-trip (WebCrypto ↔ Node build) =========
+console.log('\n[admin crypto]');
+{
+  const subtle = globalThis.crypto.subtle;
+  const gate = JSON.parse(readFileSync(path.join(EXT, 'admin-gate.json'), 'utf8'));
+  const encBuf = readFileSync(path.join(EXT, 'admin.enc'));
+  const secret = JSON.parse(readFileSync(path.join(HERE, '..', 'admin-secret.json'), 'utf8'));
+  const hexToBytes = (h) => Uint8Array.from(h.replace(/[^0-9a-f]/gi, '').match(/../g).map((x) => parseInt(x, 16)));
+  const bytesToHex = (b) => Array.from(new Uint8Array(b)).map((x) => x.toString(16).padStart(2, '0')).join('');
+  const decrypt = async (codeHex) => {
+    const ikm = hexToBytes(codeHex);
+    const pk = await subtle.importKey('raw', ikm, 'PBKDF2', false, ['deriveBits']);
+    const vbits = await subtle.deriveBits({ name: 'PBKDF2', salt: hexToBytes(gate.pbkdf2.saltHex), iterations: gate.pbkdf2.iterations, hash: gate.pbkdf2.hash }, pk, 256);
+    if (bytesToHex(vbits) !== gate.verifyHash) throw new Error('bad code');
+    const hk = await subtle.importKey('raw', ikm, 'HKDF', false, ['deriveKey']);
+    const key = await subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: new TextEncoder().encode(gate.hkdfInfo) }, hk, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+    const pt = await subtle.decrypt({ name: 'AES-GCM', iv: hexToBytes(gate.aesgcm.ivHex) }, key, encBuf);
+    return JSON.parse(new TextDecoder().decode(pt));
+  };
+  const bundle = await decrypt(secret.accessCodeHex);
+  ok('correct code decrypts a {code,css} bundle', bundle.code.length > 100 && bundle.css.length > 10);
+  const wrong = secret.accessCodeHex.replace(/.$/, (c) => (c === '0' ? '1' : '0'));
+  let rejected = false; try { await decrypt(wrong); } catch { rejected = true; }
+  ok('wrong code is rejected', rejected);
+}
+
+// ============ admin aggregation (run the real bundle under jsdom) ===========
+console.log('\n[admin aggregation]');
+{
+  const adminSrc = readFileSync(path.join(HERE, '..', 'admin-src', 'admin.js'), 'utf8');
+  document.body.innerHTML = '<div id="root"></div>';
+  // eslint-disable-next-line no-eval
+  (0, eval)(adminSrc); // defines window.renderAdmin
+  const now = Date.UTC(2026, 7, 1, 12, 0, 0);
+  const riders = [
+    ...Array.from({ length: 14 }, (_, i) => ({ n: 'A' + i, t: 'Alpha', d: 'CT', w: 50000, j: 0, loan: 0 })),
+    ...Array.from({ length: 20 }, (_, i) => ({ n: 'B' + i, t: 'Beta', d: 'PT', w: 100000, j: 0, loan: 0 })),
+    ...Array.from({ length: 15 }, (_, i) => ({ n: 'G' + i, t: 'Gamma', d: 'CT', w: 50000, j: 0, loan: 0 })),
+  ];
+  const faFacts = [
+    { id: 1, kind: 'fa', riderName: 'Big', junior: false, leaderTeam: 'Beta', leaderAmount: 1600000, winUtcMs: now - 1000, bids: [] },
+  ];
+  const day = Date.UTC(2026, 7, 1, 10, 0, 0);
+  for (let i = 0; i < 9; i++) { // Gamma: 9 riders, 21 bids in one day → over 8/20
+    const nb = i < 3 ? 3 : 2;
+    faFacts.push({ id: 100 + i, kind: 'fa', riderName: 'Gr' + i, junior: false, leaderTeam: '', leaderAmount: 0, winUtcMs: null, bids: Array.from({ length: nb }, () => ({ t: 'Gamma', u: day })) });
+  }
+  window.renderAdmin({ riders, teams: ['Alpha', 'Beta', 'Gamma'], faFacts, dealFacts: [], nowUtc: now });
+  const cards = [...document.querySelectorAll('.acard')];
+  const cardOf = (name) => cards.find((c) => c.querySelector('.aname')?.textContent === name);
+  eq('rendered 3 team cards', cards.length, 3);
+  eq('sorted PT (Beta) first', cards[0].querySelector('.aname').textContent, 'Beta');
+  ok('Alpha (14 CT) → yellow (under min)', cardOf('Alpha').classList.contains('yellow'));
+  ok('Beta over cap committed → red', cardOf('Beta').classList.contains('red'));
+  ok('Gamma bid-limit crossed → red', cardOf('Gamma').classList.contains('red'));
+  ok('Gamma shows a bid-limit label', /Bid limit crossed/.test(cardOf('Gamma').textContent));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

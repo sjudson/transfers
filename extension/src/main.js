@@ -7,12 +7,13 @@ import { computeDisplayOffsetMin } from './tz.js';
 import { crawlListing } from './crawl.js';
 import { makeQueue } from './queue.js';
 import {
-  loadDb, riderById, riderByName, squadSalary, teamDivision, divisionCap, norm,
-  riderFromThreadTitle,
+  loadDb, riderById, riderByName, squadSalary, squadRoster, juniorByName, teamDivision, divisionCap, norm,
+  riderFromThreadTitle, allRiders, allTeams,
 } from './ridersdb.js';
+import { setupAdmin, refreshAdmin } from './admin-gate.js';
 import {
   analyzeFreeAgentThread, faStatus, dailyUsage, computeTotals, dealFigures, winningDealText,
-  openingMinFor, faThreadKind, fmtBand, dealType,
+  openingMinFor, faThreadKind, fmtBand, dealType, rosterCounts, parseDeal, countsAsJunior,
   JUNIOR_MIN, MIN_WAGE, DEAL_MS, FIRST_WINDOW_UTC, TRANSFER_CLOSE_UTC,
 } from './model.js';
 import { parseForumStamp, stampToUtcMs } from './tz.js';
@@ -22,7 +23,7 @@ const FA_FORUM = 396;   // [Man-Game] Transfers: Free Agents (default)
 const DEAL_FORUM = 397; // [Man-Game] Transfers: Deals (default)
 // Bump when the snapshot schema or parsing logic changes, so stale cached
 // snapshots are discarded and everything is re-read with the current code.
-const DATA_VERSION = 9;
+const DATA_VERSION = 10;
 
 // faForum/dealForum are configurable so the tool can be pointed at an old
 // season's forums for testing, or reused in future seasons, without a rebuild.
@@ -192,6 +193,18 @@ async function fetchFaThread(threadId) {
   analysis.junior = kind === 'junior';
   const rec = { analysis, title, kind, updatedUtc: Date.now(), latestStamp: listing.get(threadId)?.lastPostStamp ?? null };
   if (kind === 'sack') Object.assign(rec, sackInfo(t.posts, title));
+  // team-agnostic facts for the admin aggregator (every team, not just mine)
+  const rider = riderFromThreadTitle(title);
+  rec.admin = {
+    kind, riderName: rider?.n || cleanTitleName(title),
+    // DB flag is authoritative for junior status; the [Junior] tag is only a
+    // fallback for riders not in the bundled DB. (The 50k-ceiling promotion is
+    // applied at roster-count time, where the winning amount is known.)
+    junior: rider ? !!rider.j : kind === 'junior',
+    leaderTeam: analysis.leadingTeam, leaderAmount: analysis.leadingAmount, winUtcMs: analysis.winUtcMs,
+    sackTeam: rec.sackTeam || null, sackWage: rec.sackWage || 0, // for [Sack] threads
+    bids: analysis.bids.map((b) => ({ t: b.team, u: b.utcMs })).filter((b) => b.t && b.u != null),
+  };
   faSnap.set(threadId, rec);
   // auto-track (or untrack) based on whether YOU are currently bidding here
   if (analysis.myBids.length > 0 && !faIgnore.has(threadId)) autoFa.add(threadId);
@@ -212,6 +225,8 @@ async function fetchDealThread(threadId) {
   if (!isFinite(lastPostUtc)) lastPostUtc = Date.now();
   // Voided/cancelled deals: a later post declares it off (excluded from totals).
   const voided = t.posts.slice(1).some((p) => /\b(void(ed)?|cancell?ed)\b/i.test(p.text || ''));
+  // team-agnostic winning-deal blocks for the admin aggregator (both sides)
+  const wd = parseDeal(winningDealText(t.posts));
   dealSnap.set(threadId, {
     title: t.title || listing.get(threadId)?.title, voided,
     involvesMe: fig.involvesMe, isLoan: fig.isLoan, mySide: fig.mySide,
@@ -220,6 +235,7 @@ async function fetchDealThread(threadId) {
     teamA: fig.teamA, teamB: fig.teamB, dealFee: fig.dealFee, neutralType: fig.neutralType,
     lastPostUtc, updatedUtc: Date.now(),
     latestStamp: listing.get(threadId)?.lastPostStamp ?? null,
+    admin: { a: wd.teamA, b: wd.teamB, isLoan: wd.isLoan, voided, opUtc: isFinite(lastPostUtc) ? lastPostUtc : null },
   });
 }
 
@@ -315,10 +331,12 @@ function buildState() {
     const snap = faSnap.get(threadId);
     const title = snap?.title || listing.get(threadId)?.title || '';
     const kind = snap?.kind || faThreadKind(title) || 'fa';
-    const junior = kind === 'junior';
-    const openMin = junior ? JUNIOR_MIN : MIN_WAGE;
+    const juniorThread = kind === 'junior';       // thread type -> opening minimum
+    const openMin = juniorThread ? JUNIOR_MIN : MIN_WAGE;
     const dbRider = riderFromThreadTitle(title);
     const rider = dbRider || { id: `t${threadId}`, n: cleanTitleName(title) || `Thread ${threadId}`, d: '-', w: 0, fa: 1 };
+    // DB flag is authoritative for junior status; [Junior] tag is the fallback.
+    const junior = dbRider ? !!dbRider.j : juniorThread;
     const analysis = snap?.analysis || { leadingAmount: null, minNextBid: openMin, myHighest: null, amILeading: false, myBids: [], winUtcMs: null };
     analysis.threadId = threadId;
     faAnalyses.push(analysis);
@@ -369,6 +387,7 @@ function buildState() {
     deals.push({
       threadId, title: snap?.title || listing.get(threadId)?.title,
       involvesMe, isLoan, type, voided: !!snap?.voided, mySide: snap?.mySide || null,
+      ridersIn: snap?.ridersIn || [], ridersOut: snap?.ridersOut || [],
       teams: [snap?.teamA, snap?.teamB].filter(Boolean),
       lastPostUtc: snap?.lastPostUtc, closeUtc, completed: closeUtc != null && nowUtc >= closeUtc,
       figures, display,
@@ -413,9 +432,29 @@ function buildState() {
   });
   const usage = dailyUsage(faAnalyses, nowUtc, FIRST_WINDOW_UTC);
 
+  // roster counts for MY team (existing squad ± confirmed/pending signings & deals)
+  const rb = { existing: squadRoster(cfg.myTeam), confirmed: { full: 0, jr: 0 }, pending: { full: 0, jr: 0 }, departed: { full: 0, jr: 0 } };
+  const addJr = (o, isJr) => { o[isJr ? 'jr' : 'full']++; };
+  for (const f of fa) {
+    if (!f.a.amILeading) continue;
+    // a junior bid above 50k is promoted to a normal (full-slot) signing
+    addJr(f.completed ? rb.confirmed : rb.pending, countsAsJunior(f.junior, f.a.leadingAmount));
+  }
+  for (const d of deals) {
+    if (!d.involvesMe || d.voided) continue;
+    if (!d.isLoan) { // transfers change ownership
+      for (const n of d.ridersIn) addJr(d.completed ? rb.confirmed : rb.pending, juniorByName(n));
+      if (d.completed) for (const n of d.ridersOut) addJr(rb.departed, juniorByName(n));
+    } else if (d.completed) { // loan-out removes an owned rider from the count; loan-in isn't owned
+      for (const n of d.ridersOut) addJr(rb.departed, juniorByName(n));
+    }
+  }
+  for (const k of sacks) addJr(rb.departed, !!k.rider?.j); // your sacks depart
+  const roster = rosterCounts(divChosen || 'CT', rb);
+
   return {
     config: cfg, nowUtc, offsetMin, loginRequired,
-    fa, deals, sacks, totals, usage,
+    fa, deals, sacks, totals, usage, roster,
     division: { code: divChosen || 'CT', assumed: !divChosen, cap },
     init: { active: initializing, scanned: faSnap.size + dealSnap.size },
     firstWindowUtc: FIRST_WINDOW_UTC, transferCloseUtc: TRANSFER_CLOSE_UTC,
@@ -423,7 +462,15 @@ function buildState() {
   };
 }
 
-function render() { ui.render(buildState()); }
+function render() { ui.render(buildState()); refreshAdmin(); }
+
+// Team-agnostic snapshot the admin panel aggregates (all teams).
+function adminSnapshot() {
+  const faFacts = [], dealFacts = [];
+  for (const [id, s] of faSnap) if (s.admin) faFacts.push({ id, ...s.admin });
+  for (const [id, s] of dealSnap) if (s.admin) dealFacts.push({ id, title: s.title, ...s.admin });
+  return { riders: allRiders(), teams: allTeams(), faFacts, dealFacts, nowUtc: Date.now() };
+}
 
 // ---- 1s ticker (countdowns only; never rebuilds tables) --------------------
 function tick() {
@@ -518,6 +565,7 @@ async function boot() {
   ui.setForumInputs(cfg.faForum, cfg.dealForum);
   ui.setDivision(cfg.division);
   ui.setMoneyInputs(cfg.baseSalary, cfg.budget, cfg.reserve);
+  setupAdmin(adminSnapshot);
   render(); // show cached snapshots immediately
   // The worker's first read happens one chunk in (not on load), then it fetches
   // ~13 threads every 5s and re-renders the whole UI once per refresh window.

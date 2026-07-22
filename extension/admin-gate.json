@@ -1,0 +1,12 @@
+{
+  "verifyHash": "025b14f23483e9328a083950a09b359490b2dd105ae267f9037505ea7229a7ed",
+  "pbkdf2": {
+    "saltHex": "c14e3cf8bad5be006a782915ad56332c",
+    "iterations": 600000,
+    "hash": "SHA-256"
+  },
+  "hkdfInfo": "mangame-admin-aesgcm-v1",
+  "aesgcm": {
+    "ivHex": "1341e0e70f114cf57952dce8"
+  }
+}

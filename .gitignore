@@ -5,3 +5,10 @@ test/package-lock.json
 research/samples/*.html
 *.log
 .DS_Store
+
+# Private admin assets — must never be committed to any branch.
+# admin-secret.json holds the access code; admin-src/ is the cleartext admin
+# logic (public source would defeat admin.enc). Only the encrypted artifacts
+# (extension/admin.enc + admin-gate.json) and the build tool are safe to commit.
+admin-secret.json
+admin-src/

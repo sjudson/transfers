@@ -141,6 +141,7 @@ export function analyzeFreeAgentThread(posts, offsetMin, myTeam, openingMin = MI
     myHighest,
     amILeading,
     myBids,
+    bids: bidLog, // full team-agnostic log: {utcMs, amount, team, valid}
     bidCount: bidLog.length,
     winUtcMs: lead?.utcMs != null ? lead.utcMs + WIN_MS : null,
   };
@@ -268,6 +269,43 @@ export function euroAmounts(text) {
     }
   }
   return Array.from(out).sort((a, b) => a - b);
+}
+
+// ---- roster size (squad counts vs the division min/max) --------------------
+// CT: 15–20, juniors count as ½ toward the 15 minimum (full toward the 20 max).
+// PT/PCT: 20–30, juniors count as full. Loaned-out riders are excluded upstream.
+export function isCtDivision(div) { return (div || '').toUpperCase() === 'CT'; }
+export function rosterLimits(div) { return isCtDivision(div) ? { min: 15, max: 20 } : { min: 20, max: 30 }; }
+
+// A junior only counts as a half-rider while their signing price stays at/under
+// the 50k junior ceiling. If a junior negotiation is bid above 50k the signing
+// becomes a normal free agency (regardless of the [Junior] thread title) and the
+// rider counts as a full roster slot. `isJunior` should already be the
+// DB-authoritative junior status (DB flag first, [Junior] tag as fallback).
+export const JUNIOR_WAGE_CEILING = 50000;
+export function countsAsJunior(isJunior, winningAmount) {
+  return !!isJunior && (winningAmount || 0) <= JUNIOR_WAGE_CEILING;
+}
+
+// b = { existing, confirmed, pending, departed }, each { full, jr } (jr = juniors).
+// Returns per-bucket totals plus committed / projected weighted counts and flags.
+export function rosterCounts(div, b = {}) {
+  const ct = isCtDivision(div);
+  const lim = rosterLimits(div);
+  const bucket = (o = {}) => ({ full: o.full || 0, jr: o.jr || 0, total: (o.full || 0) + (o.jr || 0) });
+  const ex = bucket(b.existing), cf = bucket(b.confirmed), pe = bucket(b.pending), de = bucket(b.departed);
+  const minW = (full, jr) => (ct ? full + 0.5 * jr : full + jr);
+  const maxW = (full, jr) => full + jr;
+  const comFull = ex.full + cf.full - de.full, comJr = ex.jr + cf.jr - de.jr;
+  const committed = { full: comFull, jr: comJr, total: comFull + comJr, minCount: minW(comFull, comJr), maxCount: maxW(comFull, comJr) };
+  const projected = { full: comFull + pe.full, jr: comJr + pe.jr, total: comFull + pe.full + comJr + pe.jr, minCount: minW(comFull + pe.full, comJr + pe.jr), maxCount: maxW(comFull + pe.full, comJr + pe.jr) };
+  return {
+    ct, min: lim.min, max: lim.max,
+    existing: ex, confirmed: cf, pending: pe, departed: de,
+    committed, projected,
+    underMin: committed.minCount < lim.min, overMax: committed.maxCount > lim.max,
+    projUnderMin: projected.minCount < lim.min, projOverMax: projected.maxCount > lim.max,
+  };
 }
 
 // Progressive sacking fines: the nth rider a team sacks costs n × its wage.

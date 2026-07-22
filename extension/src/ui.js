@@ -178,6 +178,30 @@ function renderUsage(s) {
   $('uRidersLeft').textContent = u.ridersLeft;
   $('uBidsLeft').textContent = u.bidsLeft;
   renderTiming(s);
+  renderRoster(s);
+}
+
+// count with a golf-scorecard-style junior superscript, e.g. 18 ²ʲ
+function countEl(o, sign = '') {
+  const span = el('span');
+  span.append(document.createTextNode(sign + (o.total || 0)));
+  if (o.jr) { const sup = el('sup', 'jrsup', o.jr + 'j'); span.append(sup); }
+  return span;
+}
+function putCount(id, o, sign = '') { const e = $(id); e.textContent = ''; e.append(countEl(o, sign)); }
+
+function renderRoster(s) {
+  const r = s.roster;
+  $('rDiv').textContent = `(${r.ct ? 'CT' : (s.division.code || '')} ${r.min}–${r.max})`;
+  const squad = $('rSquad'); squad.textContent = '';
+  squad.append(countEl(r.committed));
+  squad.append(document.createTextNode(` / ${r.min}–${r.max}`));
+  squad.classList.toggle('over', r.overMax);
+  squad.classList.toggle('under', r.underMin);
+  putCount('rExisting', r.existing);
+  putCount('rConfirmed', r.confirmed, '+');
+  putCount('rPending', r.pending, '+');
+  putCount('rDeparted', r.departed, '−');
 }
 
 // Transfer-window open/close status. Before open → countdown; once open → green
