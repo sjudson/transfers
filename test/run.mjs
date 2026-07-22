@@ -97,7 +97,9 @@ console.log('\n[minIncrement]');
 console.log('\n[ridersdb]');
 {
   const teams = rdb.allTeams();
-  ok('56 teams loaded', teams.length === 56, String(teams.length));
+  ok('61 teams loaded (56 DB + 4 new CT + (other))', teams.length === 61, String(teams.length));
+  ok('allTeamsFull carries divisions', rdb.allTeamsFull().every((t) => t.name && t.div));
+  eq('new CT team present with CT division', rdb.teamDivision('Billstedt-Horn'), 'CT');
   const aman = rdb.riderById(5);
   ok('rider 5 is Awet Aman (FA)', aman && aman.n === 'Awet Aman' && aman.fa === 1);
   eq('riderFromThreadTitle [Free Agent] Awet Aman', rdb.riderFromThreadTitle('[Free Agent] Awet Aman')?.id, 5);
@@ -507,15 +509,23 @@ console.log('\n[admin aggregation]');
     const nb = i < 3 ? 3 : 2;
     faFacts.push({ id: 100 + i, kind: 'fa', riderName: 'Gr' + i, junior: false, leaderTeam: '', leaderAmount: 0, winUtcMs: null, bids: Array.from({ length: nb }, () => ({ t: 'Gamma', u: day })) });
   }
-  window.renderAdmin({ riders, teams: ['Alpha', 'Beta', 'Gamma'], faFacts, dealFacts: [], nowUtc: now });
+  // teams carry authoritative divisions; "Newbie" has no riders (new CT team)
+  const teams = [
+    { name: 'Alpha', div: 'CT' }, { name: 'Beta', div: 'PT' },
+    { name: 'Gamma', div: 'CT' }, { name: 'Newbie', div: 'CT' },
+  ];
+  window.renderAdmin({ riders, teams, faFacts, dealFacts: [], nowUtc: now });
   const cards = [...document.querySelectorAll('.acard')];
   const cardOf = (name) => cards.find((c) => c.querySelector('.aname')?.textContent === name);
-  eq('rendered 3 team cards', cards.length, 3);
+  eq('rendered 4 team cards', cards.length, 4);
   eq('sorted PT (Beta) first', cards[0].querySelector('.aname').textContent, 'Beta');
   ok('Alpha (14 CT) → yellow (under min)', cardOf('Alpha').classList.contains('yellow'));
   ok('Beta over cap committed → red', cardOf('Beta').classList.contains('red'));
   ok('Gamma bid-limit crossed → red', cardOf('Gamma').classList.contains('red'));
   ok('Gamma shows a bid-limit label', /Bid limit crossed/.test(cardOf('Gamma').textContent));
+  // new team with no riders still gets its CT division/cap from the teams list
+  ok('Newbie (new CT, 0 riders) shows CT division', /CT/.test(cardOf('Newbie').querySelector('.adiv').textContent));
+  ok('Newbie under min (0 < 15) → yellow', cardOf('Newbie').classList.contains('yellow'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -8,7 +8,7 @@ import { crawlListing } from './crawl.js';
 import { makeQueue } from './queue.js';
 import {
   loadDb, riderById, riderByName, squadSalary, squadRoster, juniorByName, teamDivision, divisionCap, norm,
-  riderFromThreadTitle, allRiders, allTeams,
+  riderFromThreadTitle, allRiders, allTeamsFull,
 } from './ridersdb.js';
 import { setupAdmin, refreshAdmin } from './admin-gate.js';
 import {
@@ -469,7 +469,7 @@ function adminSnapshot() {
   const faFacts = [], dealFacts = [];
   for (const [id, s] of faSnap) if (s.admin) faFacts.push({ id, ...s.admin });
   for (const [id, s] of dealSnap) if (s.admin) dealFacts.push({ id, title: s.title, ...s.admin });
-  return { riders: allRiders(), teams: allTeams(), faFacts, dealFacts, nowUtc: Date.now() };
+  return { riders: allRiders(), teams: allTeamsFull(), faFacts, dealFacts, nowUtc: Date.now() };
 }
 
 // ---- 1s ticker (countdowns only; never rebuilds tables) --------------------
