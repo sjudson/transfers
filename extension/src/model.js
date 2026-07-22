@@ -277,14 +277,15 @@ export function euroAmounts(text) {
 export function isCtDivision(div) { return (div || '').toUpperCase() === 'CT'; }
 export function rosterLimits(div) { return isCtDivision(div) ? { min: 15, max: 20 } : { min: 20, max: 30 }; }
 
-// A junior only counts as a half-rider while their signing price stays at/under
-// the 50k junior ceiling. If a junior negotiation is bid above 50k the signing
-// becomes a normal free agency (regardless of the [Junior] thread title) and the
-// rider counts as a full roster slot. `isJunior` should already be the
-// DB-authoritative junior status (DB flag first, [Junior] tag as fallback).
+// The DB "j" flag (and the [Junior] thread tag) mark junior-ELIGIBILITY, not that
+// a rider is actually signed as a junior. A rider only counts as a half-rider
+// while their money is a junior wage — strictly below the 50k normal-signing
+// floor. At/above 50k they were (re)signed as a normal rider and fill a full
+// slot. `eligible` is the eligibility flag; `amount` is the rider's current wage
+// (existing/traded squad riders) or winning bid (fresh free-agent signings).
 export const JUNIOR_WAGE_CEILING = 50000;
-export function countsAsJunior(isJunior, winningAmount) {
-  return !!isJunior && (winningAmount || 0) <= JUNIOR_WAGE_CEILING;
+export function countsAsJunior(eligible, amount) {
+  return !!eligible && (amount || 0) < JUNIOR_WAGE_CEILING;
 }
 
 // b = { existing, confirmed, pending, departed }, each { full, jr } (jr = juniors).

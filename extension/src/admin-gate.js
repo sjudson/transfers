@@ -52,6 +52,7 @@ async function decryptBundle(codeInput, gate) {
 
 let iframe = null;
 let getSnapshot = null;
+let onSetBudget = null;
 let running = false;
 
 function ensureIframe() {
@@ -118,9 +119,16 @@ async function openAdmin() {
   $('adminCancel').onclick = () => modal.classList.add('hidden');
 }
 
-// Wire the header Admin button + tab toggle. `snapshotFn` returns the admin data.
-export function setupAdmin(snapshotFn) {
+// Wire the header Admin button + tab toggle. `snapshotFn` returns the admin data;
+// `setBudget(team, amount)` persists an admin-entered per-team budget.
+export function setupAdmin(snapshotFn, setBudget) {
   getSnapshot = snapshotFn;
+  onSetBudget = setBudget || null;
+  // budgets are typed inside the sandboxed iframe, which posts them up to us
+  window.addEventListener('message', (ev) => {
+    const m = ev.data || {};
+    if (m.type === 'set-budget' && onSetBudget) onSetBudget(m.team, m.amount);
+  });
   $('adminBtn').addEventListener('click', openAdmin);
   $('tabTeam').addEventListener('click', () => showTab('team'));
   $('tabAdmin').addEventListener('click', () => showTab('admin'));

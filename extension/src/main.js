@@ -34,6 +34,7 @@ const cfgDefaults = {
   myTeam: '', refreshSec: 30, division: 'auto', baseSalary: '', budget: '', reserve: '',
   shortlist: [], faThreads: [], deals: [],
   faForum: FA_FORUM, dealForum: DEAL_FORUM,
+  adminBudgets: {}, // admin-only: norm(team) -> budget (€) for the admin panel
 };
 let cfg = { ...cfgDefaults };
 
@@ -449,7 +450,7 @@ function buildState() {
       for (const n of d.ridersOut) addJr(rb.departed, juniorByName(n));
     }
   }
-  for (const k of sacks) addJr(rb.departed, !!k.rider?.j); // your sacks depart
+  for (const k of sacks) addJr(rb.departed, countsAsJunior(k.rider?.j, k.rider?.w)); // your sacks depart
   const roster = rosterCounts(divChosen || 'CT', rb);
 
   return {
@@ -469,7 +470,18 @@ function adminSnapshot() {
   const faFacts = [], dealFacts = [];
   for (const [id, s] of faSnap) if (s.admin) faFacts.push({ id, ...s.admin });
   for (const [id, s] of dealSnap) if (s.admin) dealFacts.push({ id, title: s.title, ...s.admin });
-  return { riders: allRiders(), teams: allTeamsFull(), faFacts, dealFacts, nowUtc: Date.now() };
+  return { riders: allRiders(), teams: allTeamsFull(), faFacts, dealFacts, nowUtc: Date.now(), budgets: cfg.adminBudgets };
+}
+
+// Persist an admin-entered per-team budget (keyed by normalized team name), then
+// re-push so the admin panel reflects the on-track / exceeded verdict immediately.
+async function setAdminBudget(team, amount) {
+  const k = norm(team);
+  if (!k) return;
+  if (amount == null || amount === '' || isNaN(Number(amount))) delete cfg.adminBudgets[k];
+  else cfg.adminBudgets[k] = Number(amount);
+  await saveCfg();
+  refreshAdmin();
 }
 
 // ---- 1s ticker (countdowns only; never rebuilds tables) --------------------
@@ -565,7 +577,7 @@ async function boot() {
   ui.setForumInputs(cfg.faForum, cfg.dealForum);
   ui.setDivision(cfg.division);
   ui.setMoneyInputs(cfg.baseSalary, cfg.budget, cfg.reserve);
-  setupAdmin(adminSnapshot);
+  setupAdmin(adminSnapshot, setAdminBudget);
   render(); // show cached snapshots immediately
   // The worker's first read happens one chunk in (not on load), then it fetches
   // ~13 threads every 5s and re-renders the whole UI once per refresh window.

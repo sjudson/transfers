@@ -103,16 +103,21 @@ export function squadSalary(teamName) {
   return { salary: sum, count };
 }
 
+// Junior-for-counting: "j" is junior ELIGIBILITY; a rider only counts as a ½
+// junior while on a junior wage (< 50k). At/above 50k they were resigned as a
+// normal rider. (Mirrors model.js countsAsJunior; inlined to avoid a cycle.)
+const countsJunior = (r) => !!(r && r.j && (r.w || 0) < 50000);
+
 // Owned, active squad for a team (excludes loaned-out riders), split full/junior.
 export function squadRoster(teamName) {
   const nt = norm(teamName);
   let full = 0, jr = 0;
   for (const r of RIDERS) {
-    if (norm(r.t) === nt && !r.loan) { if (r.j) jr++; else full++; }
+    if (norm(r.t) === nt && !r.loan) { if (countsJunior(r)) jr++; else full++; }
   }
   return { full, jr };
 }
-export const juniorByName = (name) => !!(riderByName(name) && riderByName(name).j);
+export const juniorByName = (name) => countsJunior(riderByName(name));
 
 export function divisionCap(div) {
   const d = (div || '').toUpperCase();

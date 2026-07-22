@@ -449,10 +449,10 @@ console.log('\n[rosterCounts]');
 
 console.log('\n[junior 50k ceiling]');
 {
-  ok('junior at 20k counts as junior', model.countsAsJunior(true, 20000) === true);
-  ok('junior at exactly 50k still junior', model.countsAsJunior(true, 50000) === true);
-  ok('junior bid above 50k is promoted to full', model.countsAsJunior(true, 55000) === false);
-  ok('non-junior never counts as junior', model.countsAsJunior(false, 20000) === false);
+  ok('eligible at 20k counts as junior', model.countsAsJunior(true, 20000) === true);
+  ok('eligible at exactly 50k is a normal signing', model.countsAsJunior(true, 50000) === false);
+  ok('eligible above 50k is a normal signing', model.countsAsJunior(true, 55000) === false);
+  ok('not junior-eligible never counts as junior', model.countsAsJunior(false, 20000) === false);
   ok('missing amount treated as 0 (junior)', model.countsAsJunior(true, null) === true);
   // a CT team leading a [Junior] at 55k fills a FULL slot, not a half slot
   const promoted = model.rosterCounts('CT', {
@@ -526,6 +526,32 @@ console.log('\n[admin aggregation]');
   // new team with no riders still gets its CT division/cap from the teams list
   ok('Newbie (new CT, 0 riders) shows CT division', /CT/.test(cardOf('Newbie').querySelector('.adiv').textContent));
   ok('Newbie under min (0 < 15) → yellow', cardOf('Newbie').classList.contains('yellow'));
+
+  // admin-entered budget: Alpha spends 14×50k = 700k. A 600k budget is exceeded.
+  window.renderAdmin({ riders, teams, faFacts, dealFacts: [], nowUtc: now, budgets: { alpha: 600000 } });
+  const cardOf2 = (name) => [...document.querySelectorAll('.acard')].find((c) => c.querySelector('.aname')?.textContent === name);
+  ok('Alpha over its 600k budget → "Over budget" label', /Over budget/.test(cardOf2('Alpha').textContent));
+  ok('Alpha budget input prefilled with the entered figure', cardOf2('Alpha').querySelector('.abudin').value.includes('600,000'));
+  ok('Beta (no budget entered) shows no budget label', !/Over budget/.test(cardOf2('Beta').textContent));
+  ok('Beta budget input is empty', cardOf2('Beta').querySelector('.abudin').value === '');
+  // division section headers
+  const heads = [...document.querySelectorAll('.adivname')].map((h) => h.textContent);
+  ok('renders Pro Tour + Continental headers', heads.includes('Pro Tour') && heads.includes('Continental'));
+  ok('Pro Tour header precedes Continental', heads.indexOf('Pro Tour') < heads.indexOf('Continental'));
+
+  // existing squad: DB "j" is eligibility — only riders still on a junior wage
+  // (< 50k) count as ½; junior-eligible riders resigned at ≥ 50k are full.
+  const jrRiders = [
+    { n: 'Cheap', t: 'JrTeam', d: 'CT', w: 30000, j: 1, loan: 0 }, // still a junior
+    { n: 'Resigned', t: 'JrTeam', d: 'CT', w: 55000, j: 1, loan: 0 }, // eligible but normal now
+    { n: 'AtFloor', t: 'JrTeam', d: 'CT', w: 50000, j: 1, loan: 0 }, // exactly 50k → normal
+    { n: 'Plain', t: 'JrTeam', d: 'CT', w: 60000, j: 0, loan: 0 }, // not eligible
+  ];
+  window.renderAdmin({ riders: jrRiders, teams: [{ name: 'JrTeam', div: 'CT' }], faFacts: [], dealFacts: [], nowUtc: now, budgets: {} });
+  const jcard = [...document.querySelectorAll('.acard')][0];
+  const existingPart = jcard.querySelector('.abreak .apart'); // first part = existing
+  ok('existing shows all 4 riders', /4/.test(existingPart.textContent));
+  ok('existing counts exactly 1 junior (the <50k eligible one)', existingPart.querySelector('.jrsup')?.textContent === '1j');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
