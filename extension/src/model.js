@@ -127,11 +127,16 @@ export function analyzeFreeAgentThread(posts, offsetMin, myTeam, openingMin = MI
     const team = bidderTeam(p.text, myTeam, nMy);
     const threshold = lead ? lead.amount + minIncrement(lead.amount) : openingMin;
     const valid = team != null && amount >= threshold && amount % 1000 === 0;
-    if (team && nMy && norm(team) === nMy && utcMs != null) myBids.push({ utcMs, amount });
+    if (team && nMy && norm(team) === nMy && utcMs != null) myBids.push({ utcMs, amount, valid });
     bidLog.push({ utcMs, amount, team, valid });
     if (valid) lead = { amount, team, utcMs, author: p.author };
   }
-  const myHighest = myBids.reduce((mx, b) => Math.max(mx, b.amount), 0) || null;
+  // Your standing bid is your highest bid that actually COUNTED (was valid). A
+  // higher invalid bid (e.g. below the min increment) was rejected and doesn't
+  // stand — surface it separately so the card can flag it rather than imply it won.
+  const myHighest = myBids.reduce((mx, b) => (b.valid ? Math.max(mx, b.amount) : mx), 0) || null;
+  const myBidHigh = myBids.reduce((mx, b) => Math.max(mx, b.amount), 0) || null;
+  const myInvalidHigh = (myBidHigh != null && myBidHigh > (myHighest || 0)) ? myBidHigh : null;
   const amILeading = !!(lead && nMy && norm(lead.team) === nMy);
   return {
     leadingAmount: lead?.amount ?? null,
@@ -139,12 +144,36 @@ export function analyzeFreeAgentThread(posts, offsetMin, myTeam, openingMin = MI
     leadingUtcMs: lead?.utcMs ?? null,
     minNextBid: lead ? lead.amount + minIncrement(lead.amount) : openingMin,
     myHighest,
+    myInvalidHigh,
     amILeading,
     myBids,
     bids: bidLog, // full team-agnostic log: {utcMs, amount, team, valid}
     bidCount: bidLog.length,
     winUtcMs: lead?.utcMs != null ? lead.utcMs + WIN_MS : null,
   };
+}
+
+// Collapse multiple tracked threads for the SAME rider. A [Junior]/[Stagiaire]
+// thread that gets converted into a full [Free Agent] thread leaves BOTH on the
+// forum (often a repost), so one rider can appear twice — e.g. a phantom "signed
+// to X" for the abandoned junior thread alongside the real signing. Keep the
+// authoritative one: highest leading bid (a conversion escalates past 50k), then
+// most recent activity. Items whose rider can't be resolved are left as-is.
+// Each item: { riderId, threadId, updatedUtc, a: { leadingAmount, leadingUtcMs } }.
+export function dedupeFaByRider(items) {
+  const keyOf = (f) => (f.riderId != null ? `r${f.riderId}` : `t${f.threadId}`);
+  const rankOf = (f) => (f.a?.leadingAmount || 0);
+  const recencyOf = (f) => (f.a?.leadingUtcMs || f.updatedUtc || 0);
+  const seen = new Map();
+  const out = [];
+  for (const f of items) {
+    const k = keyOf(f);
+    const prev = seen.get(k);
+    if (!prev) { seen.set(k, f); out.push(f); continue; }
+    const better = rankOf(f) !== rankOf(prev) ? rankOf(f) > rankOf(prev) : recencyOf(f) > recencyOf(prev);
+    if (better) { out[out.indexOf(prev)] = f; seen.set(k, f); }
+  }
+  return out;
 }
 
 // Status label for a free-agent thread given "now".
@@ -182,7 +211,13 @@ export function dailyUsage(analyses, nowUtc, windowStartUtc = 0) {
 //   Team A:<name> / Rider Out:… / Rider In:… / Money Out:… / Money In:…
 //   Team B:<name> / … / (Loan Deal adds "Wage paid by Team X:" + "Loan Clause:")
 function dealMoney(s) { const d = (s || '').replace(/[^\d]/g, ''); return d ? parseInt(d, 10) : 0; }
-function dealRiders(s) { return (s || '').split(',').map((x) => x.trim()).filter((x) => x && x !== '-'); }
+// "Rider In: ---" (and "-", "—", "n/a", "none") are empty-slot placeholders, not
+// riders. Treating them as riders misclassifies transfers as swaps and makes
+// wageOf() return n/a, so filter them out.
+function dealRiders(s) {
+  return (s || '').split(',').map((x) => x.trim())
+    .filter((x) => x && !/^[-–—]+$/.test(x) && !/^(n\/?a|none)$/i.test(x));
+}
 
 export function parseDeal(opText) {
   const isLoan = /wage paid by|loan clause/i.test(opText || '');

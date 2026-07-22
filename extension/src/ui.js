@@ -274,7 +274,18 @@ function renderFA(s) {
 
     // ---- second line: bid economics ----
     const l2 = el('div', 'fa-l2');
-    l2.append(stat('Your bid', f.a.myHighest ? fmtEuro(f.a.myHighest) : '—'));
+    // "Your bid" = your highest bid that COUNTED. If a higher bid of yours was
+    // rejected (e.g. below the min increment), flag it rather than imply it stands.
+    if (f.a.myInvalidHigh) {
+      const node = el('span');
+      node.append(document.createTextNode(f.a.myHighest ? fmtEuro(f.a.myHighest) : '—'));
+      const flag = el('span', 'bid-rejected', `${fmtEuro(f.a.myInvalidHigh)} rejected`);
+      flag.title = 'This bid was below the minimum increment, so it did not count.';
+      node.append(flag);
+      l2.append(statNode('Your bid', node));
+    } else {
+      l2.append(stat('Your bid', f.a.myHighest ? fmtEuro(f.a.myHighest) : '—'));
+    }
     l2.append(stat('Leading', f.a.leadingAmount ? fmtEuro(f.a.leadingAmount) : '—'));
     const leadFig = el('span', 'stat'); leadFig.append(el('label', null, 'Leader'));
     if (f.a.leadingTeam) leadFig.append(badge(f.a.amILeading ? 'you' : 'other', f.a.amILeading ? 'YOU' : f.a.leadingTeam));

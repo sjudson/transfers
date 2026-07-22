@@ -12,7 +12,7 @@ import {
 } from './ridersdb.js';
 import { setupAdmin, refreshAdmin } from './admin-gate.js';
 import {
-  analyzeFreeAgentThread, faStatus, dailyUsage, computeTotals, dealFigures, winningDealText,
+  analyzeFreeAgentThread, faStatus, dailyUsage, computeTotals, dealFigures, winningDealText, dedupeFaByRider,
   openingMinFor, faThreadKind, fmtBand, dealType, rosterCounts, parseDeal, countsAsJunior,
   JUNIOR_MIN, MIN_WAGE, DEAL_MS, FIRST_WINDOW_UTC, TRANSFER_CLOSE_UTC,
 } from './model.js';
@@ -364,6 +364,12 @@ function buildState() {
       updatedUtc: null, locating: !t && !initDone,
     });
   }
+
+  // Collapse duplicate threads for the same rider (junior→FA conversion leaves
+  // both on the forum); keep the authoritative one. See dedupeFaByRider.
+  const faDedup = dedupeFaByRider(fa);
+  fa.length = 0;
+  fa.push(...faDedup);
 
   // deals: include auto-detected (involvesMe) + manually added
   const deals = [];

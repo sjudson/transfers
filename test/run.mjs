@@ -138,6 +138,50 @@ console.log('\n[analyzeFreeAgentThread]');
   eq('riders today', u.ridersToday, 1);
 }
 
+// ===== invalid own bid: "your bid" = highest VALID; a rejected raise is flagged =
+console.log('\n[invalid own bid (De Lie 67205)]');
+{
+  const A = rdb.allTeams()[0], X = rdb.allTeams()[1];
+  const mk = (team, amt, stamp) => ({ author: 'x', stampStr: stamp, text: `${team}\n${amt}€` });
+  const posts = [
+    mk(A, '570.000', '25-08-2024 20:00'),   // valid opening
+    mk(X, '600.000', '25-08-2024 21:00'),   // valid (≥ 590k)
+    mk(A, '625.000', '26-08-2024 09:29'),   // invalid: min over 600k is +30k → 630k
+  ];
+  const a = model.analyzeFreeAgentThread(posts, 60, A);
+  eq('leader is X at 600k', a.leadingAmount, 600000);
+  ok('A is not leading (625k was rejected)', a.amILeading === false);
+  eq('your bid = highest VALID (570k)', a.myHighest, 570000);
+  eq('rejected raise surfaced (625k)', a.myInvalidHigh, 625000);
+  // when a later valid bid tops your invalid one, nothing is flagged
+  const a2 = model.analyzeFreeAgentThread([
+    mk(X, '50.000', '25-08-2024 20:00'), mk(A, '54.000', '25-08-2024 20:05'), mk(A, '60.000', '25-08-2024 20:10'),
+  ], 60, A);
+  eq('no rejected flag when a valid bid is higher', a2.myInvalidHigh, null);
+  eq('your bid = 60k', a2.myHighest, 60000);
+}
+
+// ===== dedupe rider across junior→FA conversion threads =====================
+console.log('\n[dedupeFaByRider]');
+{
+  const juniorThread = { riderId: 42, threadId: 100, updatedUtc: 10, a: { leadingAmount: 25000, leadingUtcMs: 100 } };
+  const faThread = { riderId: 42, threadId: 200, updatedUtc: 20, a: { leadingAmount: 50000, leadingUtcMs: 200 } };
+  const other = { riderId: 7, threadId: 300, updatedUtc: 5, a: { leadingAmount: 80000, leadingUtcMs: 300 } };
+  const out = model.dedupeFaByRider([juniorThread, faThread, other]);
+  eq('two entries after dedupe (rider 42 collapsed)', out.length, 2);
+  ok('kept the escalated FA thread (50k), not the junior (25k)', out.some((f) => f.threadId === 200) && !out.some((f) => f.threadId === 100));
+  ok('unrelated rider is untouched', out.some((f) => f.riderId === 7));
+  // tie on amount → most recent activity wins
+  const t1 = { riderId: 9, threadId: 1, updatedUtc: 1, a: { leadingAmount: 50000, leadingUtcMs: 1 } };
+  const t2 = { riderId: 9, threadId: 2, updatedUtc: 2, a: { leadingAmount: 50000, leadingUtcMs: 2 } };
+  const out2 = model.dedupeFaByRider([t1, t2]);
+  eq('tie broken by recency', out2[0].threadId, 2);
+  // unresolved riders (riderId null) are never merged
+  const u1 = { riderId: null, threadId: 11, updatedUtc: 1, a: { leadingAmount: 0 } };
+  const u2 = { riderId: null, threadId: 12, updatedUtc: 1, a: { leadingAmount: 0 } };
+  eq('null-rider threads kept separate', model.dedupeFaByRider([u1, u2]).length, 2);
+}
+
 // ============================ commitments ==================================
 console.log('\n[computeTotals: salary breakdown + budget + sacks]');
 {
@@ -357,6 +401,16 @@ console.log('\n[dealFigures]');
   ok('loan detected', l.isLoan === true);
   eq('loan fee (B receives 290k)', l.loanFee, -290000);
   eq('loan-in salary = wage B pays', l.salaryDelta, 20000);
+
+  // "---" empty-slot placeholders must not be parsed as riders (real thread 67xxx:
+  // DK Žalgiris sells Moscon to Cervelo for 900k — a Buy, not a Swap, salary known)
+  const moscon = 'Team A: DK Žalgiris\nRider Out: Gianni Moscon\nRider In: ---\nMoney Out: 0\nMoney In: € 900,000\nTeam B: Cervelo Test Team\nRider Out: ---\nRider In: Gianni Moscon\nMoney Out: € 900,000\nMoney In: 0\nDeal confirmed by DK Žalgiris';
+  const mf = model.dealFigures(moscon, 'Cervelo Test Team', (n) => (n === 'Gianni Moscon' ? 900000 : null));
+  eq('“---” not parsed as a rider (buyer rider-in only)', mf.ridersIn.join(), 'Gianni Moscon');
+  eq('buyer rider-out empty (no phantom “---” rider)', mf.ridersOut.length, 0);
+  eq('classified as a transfer, not a swap', mf.neutralType, 'transfer');
+  eq('buyer pays 900k fee', mf.transferFee, 900000);
+  eq('salary resolves to Moscon wage (not n/a)', mf.salaryDelta, 900000);
 }
 
 // ============ REAL archived threads (2024 testbed forums 384/385) ==========
