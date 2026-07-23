@@ -124,14 +124,29 @@ async function openAdmin() {
 export function setupAdmin(snapshotFn, setBudget) {
   getSnapshot = snapshotFn;
   onSetBudget = setBudget || null;
-  // budgets are typed inside the sandboxed iframe, which posts them up to us
+  // messages from the sandboxed admin bundle (budgets, CSV export). The sandbox
+  // can't write config or trigger downloads itself, so it delegates to us.
   window.addEventListener('message', (ev) => {
     const m = ev.data || {};
     if (m.type === 'set-budget' && onSetBudget) onSetBudget(m.team, m.amount);
+    else if (m.type === 'download-csv' && running && Array.isArray(m.files)) downloadFiles(m.files);
   });
   $('adminBtn').addEventListener('click', openAdmin);
   $('tabTeam').addEventListener('click', () => showTab('team'));
   $('tabAdmin').addEventListener('click', () => showTab('admin'));
+}
+
+// Turn CSV strings from the sandbox into file downloads. The sandboxed iframe has
+// no download permission, but this page (a normal extension page) does. Stagger the
+// clicks so the browser accepts the batch rather than blocking the 2nd/3rd file.
+function downloadFiles(files) {
+  files.forEach((f, i) => setTimeout(() => {
+    const url = URL.createObjectURL(new Blob([f.content], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = f.name || 'export.csv';
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }, i * 250));
 }
 
 // Called by the app after each refresh so the admin view stays current.

@@ -608,5 +608,68 @@ console.log('\n[admin aggregation]');
   ok('existing counts exactly 1 junior (the <50k eligible one)', existingPart.querySelector('.jrsup')?.textContent === '1j');
 }
 
+console.log('\n[parseSackPost]');
+{
+  // bare-team-name form (like a bid): team is the line, wage comes from the DB (null here)
+  const bare = model.parseSackPost('Xero Racing');
+  eq('bare form: team = the line', bare.sackTeam, 'Xero Racing');
+  eq('bare form: no wage stated', bare.sackWage, null);
+  // sentence form: "<rider> (Wage: N) is sacked by <TEAM>"
+  const s1 = model.parseSackPost('Sean McKenna (Wage: 100,000) is sacked by Glanbia');
+  eq('sentence: team after "sacked by"', s1.sackTeam, 'Glanbia');
+  eq('sentence: wage from post (100,000)', s1.sackWage, 100000);
+  const s2 = model.parseSackPost('Kevin Feiereisen (Wage: 60,000) is sacked by Evonik - ELKO');
+  eq('team with a hyphen preserved', s2.sackTeam, 'Evonik - ELKO');
+  eq('wage 60k', s2.sackWage, 60000);
+  const s3 = model.parseSackPost('Jhon Stiven Ramirez (Wage: 50,000) is sacked by Spark Team NZ');
+  eq('multi-word team', s3.sackTeam, 'Spark Team NZ');
+  const s4 = model.parseSackPost('Roy Jans (Wage: 50 000) is sacked by Babymetal');
+  eq('space-separated wage (50 000)', s4.sackWage, 50000);
+  eq('team = Babymetal', s4.sackTeam, 'Babymetal');
+  const s5 = model.parseSackPost('Andrea Guardini (Wage: 70,000) is sacked by Euskadi-Murias');
+  eq('team = Euskadi-Murias', s5.sackTeam, 'Euskadi-Murias');
+  eq('wage 70k', s5.sackWage, 70000);
+}
+
+console.log('\n[transaction CSV export]');
+{
+  const now = Date.UTC(2026, 7, 5, 12, 0, 0);
+  const done = now - 3600000, future = now + 3600000;
+  const faFacts = [
+    { id: 501, kind: 'fa', riderName: 'Alice Aro', junior: false, leaderTeam: 'Beta, Inc', leaderAmount: 120000, winUtcMs: done },  // completed signing (team has a comma)
+    { id: 502, kind: 'junior', riderName: 'Jun Ior', junior: true, leaderTeam: 'Alpha', leaderAmount: 30000, winUtcMs: done },     // completed junior signing
+    { id: 503, kind: 'junior', riderName: 'Big Jr', junior: true, leaderTeam: 'Alpha', leaderAmount: 80000, winUtcMs: done },      // eligible but 80k → not "junior"
+    { id: 504, kind: 'fa', riderName: 'Notyet', junior: false, leaderTeam: 'Alpha', leaderAmount: 60000, winUtcMs: future },       // NOT completed → excluded
+    { id: 505, kind: 'sack', riderName: 'Sacked Sam', sackTeam: 'Gamma', sackWage: 90000, sackUtcMs: done },                       // Gamma's 1st sack
+    { id: 506, kind: 'sack', riderName: 'Sacked Sue', sackTeam: 'Gamma', sackWage: 50000, sackUtcMs: done + 1000 },                // Gamma's 2nd sack → 2× fee
+    { id: 507, kind: 'sack', riderName: 'Lone Sack', sackTeam: 'Alpha', sackWage: 40000, sackUtcMs: done + 2000 },                 // Alpha's 1st sack → 1× fee
+  ];
+  const dealFacts = [
+    { id: 601, a: { name: 'Alpha', out: ['Rider One'], in: [], moneyOut: 0, moneyIn: 200000 }, b: { name: 'Beta', out: [], in: ['Rider One'], moneyOut: 200000, moneyIn: 0 }, isLoan: false, voided: false, opUtc: done - 90000000 }, // completed transfer
+    { id: 602, a: { name: 'Alpha', out: ['L1'], in: [], moneyOut: 0, moneyIn: 50000 }, b: { name: 'Gamma', out: [], in: ['L1'], moneyOut: 50000, moneyIn: 0 }, isLoan: true, voided: false, opUtc: done - 90000000 },                     // completed loan
+    { id: 603, a: { name: 'Alpha', out: ['V'], in: [] }, b: { name: 'Beta', out: [], in: ['V'] }, isLoan: false, voided: true, opUtc: done - 90000000 },                                                                                  // voided → excluded
+    { id: 604, a: { name: 'Alpha', out: ['P'], in: [] }, b: { name: 'Beta', out: [], in: ['P'] }, isLoan: false, voided: false, opUtc: future },                                                                                          // not closed → excluded
+  ];
+  const csv = window.buildTransactionCsvs({ faFacts, dealFacts, nowUtc: now });
+  const lines = (s) => s.trim().split('\r\n');
+  const sign = lines(csv.signings), sack = lines(csv.sackings), tr = lines(csv.transfers);
+  eq('signings header', sign[0], 'rider,team,wage,signed_as_junior,completed_at,thread_url');
+  eq('3 completed signings (future one excluded)', sign.length, 4);
+  ok('comma in team name is quoted', sign.some((l) => l.includes('"Beta, Inc"')));
+  ok('junior signed <50k flagged yes', sign.some((l) => /Jun Ior,Alpha,30000,yes,/.test(l)));
+  ok('eligible signed ≥50k flagged no', sign.some((l) => /Big Jr,Alpha,80000,no,/.test(l)));
+  ok('signing carries a thread link', sign.some((l) => l.includes('viewthread.php?thread_id=501')));
+  ok('in-progress signing (504) excluded', !csv.signings.includes('Notyet'));
+  eq('sackings header', sack[0], 'rider,team,wage_freed,sack_fee,sacked_at,thread_url');
+  ok('1st sack fee = 1× wage', sack.some((l) => /Sacked Sam,Gamma,90000,90000,.*thread_id=505/.test(l)));
+  ok('2nd sack (same team) fee = 2× wage', sack.some((l) => /Sacked Sue,Gamma,50000,100000,/.test(l)));
+  ok('other team\'s 1st sack fee = 1× wage', sack.some((l) => /Lone Sack,Alpha,40000,40000,/.test(l)));
+  eq('transfers header', tr[0], 'deal_date,type,team_a,team_b,riders_a_to_b,riders_b_to_a,transfer_fee,loan_fee,fee_paid_by,thread_url');
+  eq('2 completed deals (voided + open excluded)', tr.length, 3);
+  ok('transfer: Beta buys, so Beta pays the fee A←B', tr.some((l) => /Transfer,Alpha,Beta,Rider One,,200000,0,Beta,/.test(l)));
+  ok('loan: Gamma pays the loan fee', tr.some((l) => /Loan,Alpha,Gamma,L1,,0,50000,Gamma,/.test(l)));
+  ok('voided deal excluded', !csv.transfers.includes('thread_id=603'));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

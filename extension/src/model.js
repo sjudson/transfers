@@ -176,6 +176,21 @@ export function dedupeFaByRider(items) {
   return out;
 }
 
+// A [Sack] thread's opening post is either a bare team name (like a bid post) or
+// a sentence "<rider> (Wage: N) is sacked by <TEAM>". Pull out the sacking team
+// and, when the post states it, the wage freed (else null → caller falls back to
+// the rider's DB wage). Handles "100,000", "50 000", "€60.000".
+export function parseSackPost(opText) {
+  const text = opText || '';
+  const firstLine = text.split('\n').map((s) => s.trim()).find((s) => /[a-z]/i.test(s)) || '';
+  const bm = /\bsacked by\s+([^\n]+?)\s*$/im.exec(text) || /\bsacked by\s+([^\n]+)/i.exec(text);
+  const sackTeam = bm ? bm[1].replace(/[.\s]+$/, '') : firstLine;
+  let sackWage = null;
+  const wm = /wage[:\s]*€?\s*(\d[\d.,\s]*\d|\d)/i.exec(text);
+  if (wm) { const n = parseInt(wm[1].replace(/\D/g, ''), 10); if (n > 0) sackWage = n; }
+  return { sackTeam, sackWage };
+}
+
 // Status label for a free-agent thread given "now".
 export function faStatus(a, nowUtc) {
   if (a.leadingAmount == null) return { key: 'nobids', label: 'No valid bids' };

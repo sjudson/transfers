@@ -12,7 +12,7 @@ import {
 } from './ridersdb.js';
 import { setupAdmin, refreshAdmin } from './admin-gate.js';
 import {
-  analyzeFreeAgentThread, faStatus, dailyUsage, computeTotals, dealFigures, winningDealText, dedupeFaByRider,
+  analyzeFreeAgentThread, faStatus, dailyUsage, computeTotals, dealFigures, winningDealText, dedupeFaByRider, parseSackPost,
   openingMinFor, faThreadKind, fmtBand, dealType, rosterCounts, parseDeal, countsAsJunior,
   JUNIOR_MIN, MIN_WAGE, DEAL_MS, FIRST_WINDOW_UTC, TRANSFER_CLOSE_UTC,
 } from './model.js';
@@ -23,7 +23,7 @@ const FA_FORUM = 396;   // [Man-Game] Transfers: Free Agents (default)
 const DEAL_FORUM = 397; // [Man-Game] Transfers: Deals (default)
 // Bump when the snapshot schema or parsing logic changes, so stale cached
 // snapshots are discarded and everything is re-read with the current code.
-const DATA_VERSION = 10;
+const DATA_VERSION = 11; // bump to re-parse cached threads (sack team/wage parsing fix)
 
 // faForum/dealForum are configurable so the tool can be pointed at an old
 // season's forums for testing, or reused in future seasons, without a rebuild.
@@ -203,7 +203,7 @@ async function fetchFaThread(threadId) {
     // applied at roster-count time, where the winning amount is known.)
     junior: rider ? !!rider.j : kind === 'junior',
     leaderTeam: analysis.leadingTeam, leaderAmount: analysis.leadingAmount, winUtcMs: analysis.winUtcMs,
-    sackTeam: rec.sackTeam || null, sackWage: rec.sackWage || 0, // for [Sack] threads
+    sackTeam: rec.sackTeam || null, sackWage: rec.sackWage || 0, sackUtcMs: rec.sackTimeUtc || null, // for [Sack] threads
     bids: analysis.bids.map((b) => ({ t: b.team, u: b.utcMs })).filter((b) => b.t && b.u != null),
   };
   faSnap.set(threadId, rec);
@@ -303,12 +303,12 @@ const parseThreadId = (input) => {
 // by posting convention), the sacked rider's wage (from the DB), and when.
 function sackInfo(posts, title) {
   const op = posts[0];
-  const line = (op?.text || '').split('\n').map((s) => s.trim()).find((s) => /[a-z]/i.test(s)) || '';
+  const { sackTeam, sackWage } = parseSackPost(op?.text || '');
   const rider = riderFromThreadTitle(title);
   const p = parseForumStamp(op?.stampStr);
   return {
-    sackTeam: line,
-    sackWage: rider?.w || 0,
+    sackTeam,
+    sackWage: sackWage != null ? sackWage : (rider?.w || 0), // post-stated wage wins, else DB
     sackTimeUtc: p ? stampToUtcMs(p, offsetMin) : null,
   };
 }
