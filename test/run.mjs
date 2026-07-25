@@ -376,6 +376,34 @@ console.log('\n[crawlListing high-water paging]');
      Array.from({ length: 25 }, (_, i) => 1000 + i).every((id) => catchUp.seen.includes(id)));
   ok('catch-up stopped before paging the whole forum', catchUp.reads.length < 3);
 
+  // Regression: an OLD pinned sticky on page 1 must not stop the crawl early —
+  // otherwise a catch-up after time away misses changes that spilled to page 2.
+  const stickyRow = `<tr><td class='tbl1'><img src='../images/stickythread.gif'/><a href='viewthread.php?thread_id=9999'>Rules</a></td>
+    <td class='tbl2'><a href='../profile.php?lookup=1' class='profile-link'>u</a></td>
+    <td class='tbl1'>9</td><td class='tbl2'>9</td>
+    <td class='tbl1'>01-01-2020 08:00<br /><span class='small'>by <a href='#'>u</a></span></td></tr>`;
+  const rowHtml = (i) => `<tr><td class='tbl1'><a href='viewthread.php?thread_id=${1000 + i}'>Thread ${i}</a></td>
+    <td class='tbl2'><a href='../profile.php?lookup=1' class='profile-link'>u</a></td>
+    <td class='tbl1'>50</td><td class='tbl2'>3</td>
+    <td class='tbl1'>${stampOf(i)}<br /><span class='small'>by <a href='#'>u</a></span></td></tr>`;
+  const wrap = (inner) => `<!doctype html><html><body><td class='sub-header'>24-07-2026 12:05</td><table>${inner}</table></body></html>`;
+  const stReads = [], stSeen = [];
+  const stFetch = async (rowstart, page) => {
+    stReads.push(page);
+    let rows = '';
+    if (page === 0) { rows = stickyRow; for (let i = 0; i <= 18; i++) rows += rowHtml(i); } // sticky + t0..t18 = 20 rows
+    else { const start = 19 + (page - 1) * STEP; for (let i = start; i < Math.min(start + STEP, TOTAL); i++) rows += rowHtml(i); }
+    return { body: wrap(rows), fetchedAtUtcMs: Date.parse('2026-07-24T11:05:00Z') };
+  };
+  let stOff = 60;
+  await crawl.crawlListing({
+    fetchPageFn: stFetch, prevHW: utcOf(25), pageStep: STEP,
+    getOffset: () => stOff, setOffset: (o) => { stOff = o; }, onRow: (r) => stSeen.push(r.threadId),
+  });
+  eq('old sticky on page 1 does not stop the crawl early', stReads.length, 2);
+  ok('catches changed threads that spilled past the sticky onto page 2',
+     Array.from({ length: 25 }, (_, i) => 1000 + i).every((id) => stSeen.includes(id)));
+
   // Login gate is surfaced, not silently swallowed.
   const gated = await crawl.crawlListing({
     fetchPageFn: async () => ({ loginRequired: true }), prevHW: 0,

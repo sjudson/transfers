@@ -11,6 +11,26 @@ const THREAD_URL = (id) => `https://pcmdaily.com/forum/viewthread.php?thread_id=
 let H = {};
 let dragging = false; // true while a card is being dragged (pauses the 30s rebuild)
 
+// Edge auto-scroll: while dragging near the top/bottom of the viewport, scroll the
+// page. Driven by a rAF loop (not dragover) because dragover stops firing when the
+// pointer is held still at an edge. dragPointerY is updated by a document-level
+// dragover so it keeps tracking even past the dragged list's bounds.
+let dragPointerY = 0;
+let scrollRAF = null;
+const SCROLL_EDGE = 70;   // px from the top/bottom edge that triggers scrolling
+const SCROLL_MAX = 18;    // px/frame at the very edge (eases to 0 at the zone's inner edge)
+function autoScrollTick() {
+  if (!dragging) { scrollRAF = null; return; }
+  const h = window.innerHeight, y = dragPointerY;
+  let dy = 0;
+  if (y < SCROLL_EDGE) dy = -Math.ceil(SCROLL_MAX * (1 - y / SCROLL_EDGE));
+  else if (y > h - SCROLL_EDGE) dy = Math.ceil(SCROLL_MAX * (1 - (h - y) / SCROLL_EDGE));
+  if (dy) window.scrollBy(0, dy);
+  scrollRAF = requestAnimationFrame(autoScrollTick);
+}
+function startAutoScroll() { if (!scrollRAF) scrollRAF = requestAnimationFrame(autoScrollTick); }
+function stopAutoScroll() { if (scrollRAF) { cancelAnimationFrame(scrollRAF); scrollRAF = null; } }
+
 // Wire drag-to-reorder on a container via event delegation, so it survives the
 // innerHTML rebuild each render. Cards must be draggable with a data-key set.
 // On drop we read the DOM order and hand the key sequence back to persist.
@@ -29,7 +49,9 @@ function setupDrag(container, kind, itemSel) {
     const item = e.target.closest(itemSel);
     if (!item || !container.contains(item)) return;
     dragEl = item; dragging = true;
+    dragPointerY = e.clientY;
     item.classList.add('dragging');
+    startAutoScroll();
     if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', item.dataset.key || ''); } catch (_) {} }
   });
   container.addEventListener('dragover', (e) => {
@@ -45,6 +67,7 @@ function setupDrag(container, kind, itemSel) {
     if (!dragEl) return;
     dragEl.classList.remove('dragging');
     dragEl = null; dragging = false;
+    stopAutoScroll();
     const keys = [...container.querySelectorAll(itemSel)].map((n) => n.dataset.key).filter(Boolean);
     if (H.reorder) H.reorder(kind, keys);
   });
@@ -77,6 +100,8 @@ export function setup(handlers) {
   setupDrag($('faList'), 'fa', '.fa-card');
   setupDrag($('sackList'), 'sack', '.fa-card');
   setupDrag($('dealBody'), 'deal', 'tr');
+  // track the pointer for edge auto-scroll even past a list's bounds
+  document.addEventListener('dragover', (e) => { if (dragging) dragPointerY = e.clientY; });
 
   // rider search (debounced)
   let t;

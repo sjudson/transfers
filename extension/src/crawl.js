@@ -32,8 +32,15 @@ export async function crawlListing({
     if (!rows.length) break;
 
     let pageOldest = Infinity;
+    let nonSticky = 0;
     for (const r of rows) {
       onRow(r);
+      // Stickies are PINNED to the top regardless of activity, so their (often
+      // old) last-post time must not drive the crawl-depth decision — otherwise
+      // a sticky on page 1 makes pageOldest < prevHW and we stop after one page,
+      // missing changes on page 2+ (e.g. catching up after time away).
+      if (r.sticky) continue;
+      nonSticky++;
       const p = parseForumStamp(r.lastPostStamp);
       if (p) {
         const utc = stampToUtcMs(p, getOffset());
@@ -42,8 +49,9 @@ export async function crawlListing({
       }
     }
     if (rows.length < pageStep) break; // last page reached (avoids an empty fetch)
-    // Everything below a page whose oldest thread predates prevHW is unchanged.
-    if (!firstRun && pageOldest < prevHW) break;
+    // Everything below a page whose oldest non-sticky thread predates prevHW is
+    // unchanged. (Guard against an all-sticky page leaving pageOldest at Infinity.)
+    if (!firstRun && nonSticky > 0 && pageOldest < prevHW) break;
   }
   return { newest, loginRequired: false, pagesRead };
 }

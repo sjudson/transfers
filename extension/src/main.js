@@ -23,7 +23,7 @@ const FA_FORUM = 396;   // [Man-Game] Transfers: Free Agents (default)
 const DEAL_FORUM = 397; // [Man-Game] Transfers: Deals (default)
 // Bump when the snapshot schema or parsing logic changes, so stale cached
 // snapshots are discarded and everything is re-read with the current code.
-const DATA_VERSION = 12; // bump to re-read threads stuck by the listing-stamp masking bug
+const DATA_VERSION = 13; // bump to full re-crawl and recover bids missed by the sticky-break bug
 
 // faForum/dealForum are configurable so the tool can be pointed at an old
 // season's forums for testing, or reused in future seasons, without a rebuild.
