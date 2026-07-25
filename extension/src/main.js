@@ -2,7 +2,7 @@
 // incremental fetching, and derived totals. Everything runs in this page.
 import { kv } from './db.js';
 import { fetchPage } from './net.js';
-import { parseListing, parseThread } from './parse.js';
+import { parseListing, parseThread, newestPostStamp } from './parse.js';
 import { computeDisplayOffsetMin } from './tz.js';
 import { crawlListing } from './crawl.js';
 import { makeQueue } from './queue.js';
@@ -13,7 +13,7 @@ import {
 import { setupAdmin, refreshAdmin } from './admin-gate.js';
 import {
   analyzeFreeAgentThread, faStatus, dailyUsage, computeTotals, dealFigures, winningDealText, dedupeFaByRider, parseSackPost,
-  openingMinFor, faThreadKind, fmtBand, dealType, rosterCounts, parseDeal, countsAsJunior,
+  openingMinFor, faThreadKind, fmtBand, dealType, rosterCounts, parseDeal, countsAsJunior, applyManualOrder,
   JUNIOR_MIN, MIN_WAGE, DEAL_MS, FIRST_WINDOW_UTC, TRANSFER_CLOSE_UTC,
 } from './model.js';
 import { parseForumStamp, stampToUtcMs } from './tz.js';
@@ -23,7 +23,7 @@ const FA_FORUM = 396;   // [Man-Game] Transfers: Free Agents (default)
 const DEAL_FORUM = 397; // [Man-Game] Transfers: Deals (default)
 // Bump when the snapshot schema or parsing logic changes, so stale cached
 // snapshots are discarded and everything is re-read with the current code.
-const DATA_VERSION = 11; // bump to re-parse cached threads (sack team/wage parsing fix)
+const DATA_VERSION = 12; // bump to re-read threads stuck by the listing-stamp masking bug
 
 // faForum/dealForum are configurable so the tool can be pointed at an old
 // season's forums for testing, or reused in future seasons, without a rebuild.
@@ -35,6 +35,7 @@ const cfgDefaults = {
   shortlist: [], faThreads: [], deals: [],
   faForum: FA_FORUM, dealForum: DEAL_FORUM,
   adminBudgets: {}, // admin-only: norm(team) -> budget (€) for the admin panel
+  faOrder: [], dealOrder: [], sackOrder: [], // drag-to-reorder card sequences (by card key)
 };
 let cfg = { ...cfgDefaults };
 
@@ -192,7 +193,9 @@ async function fetchFaThread(threadId) {
   const analysis = analyzeFreeAgentThread(t.posts, offsetMin, cfg.myTeam, openingMinFor(title));
   analysis.threadId = threadId;
   analysis.junior = kind === 'junior';
-  const rec = { analysis, title, kind, updatedUtc: Date.now(), latestStamp: listing.get(threadId)?.lastPostStamp ?? null };
+  // latestStamp = the newest post we actually PARSED (not the listing's stamp), so
+  // a fetch that came back behind the listing keeps the thread queued for re-fetch.
+  const rec = { analysis, title, kind, updatedUtc: Date.now(), latestStamp: newestPostStamp(t.posts) ?? (listing.get(threadId)?.lastPostStamp ?? null) };
   if (kind === 'sack') Object.assign(rec, sackInfo(t.posts, title));
   // team-agnostic facts for the admin aggregator (every team, not just mine)
   const rider = riderFromThreadTitle(title);
@@ -235,7 +238,7 @@ async function fetchDealThread(threadId) {
     ridersIn: fig.ridersIn || [], ridersOut: fig.ridersOut || [],
     teamA: fig.teamA, teamB: fig.teamB, dealFee: fig.dealFee, neutralType: fig.neutralType,
     lastPostUtc, updatedUtc: Date.now(),
-    latestStamp: listing.get(threadId)?.lastPostStamp ?? null,
+    latestStamp: newestPostStamp(t.posts) ?? (listing.get(threadId)?.lastPostStamp ?? null),
     admin: { a: wd.teamA, b: wd.teamB, isLoan: wd.isLoan, voided, opUtc: isFinite(lastPostUtc) ? lastPostUtc : null },
   });
 }
@@ -459,9 +462,18 @@ function buildState() {
   for (const k of sacks) addJr(rb.departed, countsAsJunior(k.rider?.j, k.rider?.w)); // your sacks depart
   const roster = rosterCounts(divChosen || 'CT', rb);
 
+  // drag-to-reorder: give each card a stable key, then apply the saved order
+  // (unknown/new cards keep their natural order at the end).
+  for (const f of fa) f.key = f.riderId != null ? 'r' + f.riderId : 't' + f.threadId;
+  for (const d of deals) d.key = 'd' + d.threadId;
+  for (const k of sacks) k.key = 's' + k.threadId;
+
   return {
     config: cfg, nowUtc, offsetMin, loginRequired,
-    fa, deals, sacks, totals, usage, roster,
+    fa: applyManualOrder(fa, cfg.faOrder),
+    deals: applyManualOrder(deals, cfg.dealOrder),
+    sacks: applyManualOrder(sacks, cfg.sackOrder),
+    totals, usage, roster,
     division: { code: divChosen || 'CT', assumed: !divChosen, cap },
     init: { active: initializing, scanned: faSnap.size + dealSnap.size },
     firstWindowUtc: FIRST_WINDOW_UTC, transferCloseUtc: TRANSFER_CLOSE_UTC,
@@ -520,6 +532,13 @@ const handlers = {
     render();
   },
   async setRefreshSec(sec) { cfg.refreshSec = sec; await saveCfg(); render(); },
+  // persist a drag-reordered card sequence (keys of the currently-shown cards)
+  async reorder(kind, keys) {
+    const field = kind === 'deal' ? 'dealOrder' : kind === 'sack' ? 'sackOrder' : 'faOrder';
+    cfg[field] = keys;
+    await saveCfg();
+    render();
+  },
   async setForums(fa, deal) {
     if (fa === cfg.faForum && deal === cfg.dealForum) return;
     cfg.faForum = fa; cfg.dealForum = deal;

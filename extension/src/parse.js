@@ -119,6 +119,15 @@ export function parseThread(html) {
   };
 }
 
+// The stamp of the newest post we actually parsed (posts are chronological, so
+// scan from the end for the last non-empty stamp). The caller compares this to the
+// listing's last-post stamp: if a fetch came back behind the listing, they differ
+// and the thread stays queued for re-fetch instead of being masked as up-to-date.
+export function newestPostStamp(posts) {
+  for (let i = (posts || []).length - 1; i >= 0; i--) if (posts[i] && posts[i].stampStr) return posts[i].stampStr;
+  return null;
+}
+
 // Convert a post body element to readable plain text (keep line breaks).
 function normalizeText(el) {
   const clone = el.cloneNode(true);

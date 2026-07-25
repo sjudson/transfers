@@ -191,6 +191,19 @@ export function parseSackPost(opText) {
   return { sackTeam, sackWage };
 }
 
+// Reorder a list of cards by a saved sequence of keys (each item carries `.key`).
+// Items whose key isn't in the saved order keep their natural order, appended
+// after the ordered ones. Drives drag-to-reorder of the card lists.
+export function applyManualOrder(items, order) {
+  if (!order || !order.length) return items.slice();
+  const idx = new Map(order.map((k, i) => [k, i]));
+  const rank = (it) => (idx.has(it.key) ? idx.get(it.key) : Infinity);
+  return items
+    .map((it, i) => [it, i])
+    .sort((a, b) => (rank(a[0]) - rank(b[0])) || (a[1] - b[1]))
+    .map((x) => x[0]);
+}
+
 // Status label for a free-agent thread given "now".
 export function faStatus(a, nowUtc) {
   if (a.leadingAmount == null) return { key: 'nobids', label: 'No valid bids' };

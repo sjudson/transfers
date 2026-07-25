@@ -263,6 +263,13 @@ console.log('\n[parse real samples]');
   const pl = parse.parseListing(listing);
   eq('parseListing returns same row count', pl.rows.length, rows.length);
   ok('parseListing extracts a header clock', /\d{2}-\d{2}-\d{4}/.test(pl.headerClock || ''), pl.headerClock);
+
+  // newestPostStamp: the latest parsed post's stamp (drives honest re-fetching)
+  const seq = [{ stampStr: '24-07-2026 17:04' }, { stampStr: '24-07-2026 17:13' }, { stampStr: '24-07-2026 17:21' }];
+  eq('newest = last post stamp', parse.newestPostStamp(seq), '24-07-2026 17:21');
+  eq('skips trailing null stamp', parse.newestPostStamp([...seq, { stampStr: null }]), '24-07-2026 17:21');
+  eq('null when no stamps', parse.newestPostStamp([{ stampStr: null }]), null);
+  eq('null on empty', parse.newestPostStamp([]), null);
 }
 
 // ============ realistic bid thread (observed markup + a quote) =============
@@ -629,6 +636,19 @@ console.log('\n[parseSackPost]');
   const s5 = model.parseSackPost('Andrea Guardini (Wage: 70,000) is sacked by Euskadi-Murias');
   eq('team = Euskadi-Murias', s5.sackTeam, 'Euskadi-Murias');
   eq('wage 70k', s5.sackWage, 70000);
+}
+
+console.log('\n[applyManualOrder]');
+{
+  const items = [{ key: 'a' }, { key: 'b' }, { key: 'c' }, { key: 'd' }];
+  const keyStr = (r) => r.map((x) => x.key).join('');
+  eq('empty order → natural order', keyStr(model.applyManualOrder(items, [])), 'abcd');
+  eq('full order applied', keyStr(model.applyManualOrder(items, ['c', 'a', 'd', 'b'])), 'cadb');
+  // new cards (not in the saved order) keep natural order, appended at the end
+  eq('unknown keys appended in natural order', keyStr(model.applyManualOrder(items, ['d', 'b'])), 'dbac');
+  // stale keys in the order that aren't present are simply ignored
+  eq('stale keys ignored', keyStr(model.applyManualOrder(items, ['z', 'c', 'y', 'a'])), 'cabd');
+  ok('returns a copy (does not mutate input)', model.applyManualOrder(items, ['b', 'a']) !== items && keyStr(items) === 'abcd');
 }
 
 console.log('\n[transaction CSV export]');

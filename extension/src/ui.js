@@ -9,6 +9,46 @@ const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) 
 const THREAD_URL = (id) => `https://pcmdaily.com/forum/viewthread.php?thread_id=${id}`;
 
 let H = {};
+let dragging = false; // true while a card is being dragged (pauses the 30s rebuild)
+
+// Wire drag-to-reorder on a container via event delegation, so it survives the
+// innerHTML rebuild each render. Cards must be draggable with a data-key set.
+// On drop we read the DOM order and hand the key sequence back to persist.
+function setupDrag(container, kind, itemSel) {
+  let dragEl = null;
+  const after = (y) => {
+    let best = { off: -Infinity, el: null };
+    for (const node of container.querySelectorAll(`${itemSel}:not(.dragging)`)) {
+      const box = node.getBoundingClientRect();
+      const off = y - box.top - box.height / 2;
+      if (off < 0 && off > best.off) best = { off, el: node };
+    }
+    return best.el;
+  };
+  container.addEventListener('dragstart', (e) => {
+    const item = e.target.closest(itemSel);
+    if (!item || !container.contains(item)) return;
+    dragEl = item; dragging = true;
+    item.classList.add('dragging');
+    if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', item.dataset.key || ''); } catch (_) {} }
+  });
+  container.addEventListener('dragover', (e) => {
+    if (!dragEl) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    const ref = after(e.clientY);
+    if (ref == null) container.appendChild(dragEl);
+    else if (ref !== dragEl) container.insertBefore(dragEl, ref);
+  });
+  container.addEventListener('drop', (e) => { if (dragEl) e.preventDefault(); });
+  container.addEventListener('dragend', () => {
+    if (!dragEl) return;
+    dragEl.classList.remove('dragging');
+    dragEl = null; dragging = false;
+    const keys = [...container.querySelectorAll(itemSel)].map((n) => n.dataset.key).filter(Boolean);
+    if (H.reorder) H.reorder(kind, keys);
+  });
+}
 
 export function setup(handlers) {
   H = handlers;
@@ -32,6 +72,11 @@ export function setup(handlers) {
   document.querySelectorAll('.panel-head').forEach((h) => {
     h.addEventListener('click', () => h.closest('.panel').classList.toggle('open'));
   });
+
+  // drag-to-reorder the card lists (delegated, so it survives re-renders)
+  setupDrag($('faList'), 'fa', '.fa-card');
+  setupDrag($('sackList'), 'sack', '.fa-card');
+  setupDrag($('dealBody'), 'deal', 'tr');
 
   // rider search (debounced)
   let t;
@@ -71,6 +116,7 @@ export function setMoneyInputs(base, budget, reserve) {
 }
 
 export function render(s) {
+  if (dragging) return; // don't rebuild the lists out from under an active drag
   // top bar
   $('bstClock').textContent = fmtBst(s.nowUtc);
   const ri = $('refreshInfo');
@@ -152,9 +198,10 @@ function renderSacks(s) {
   $('sackEmpty').classList.toggle('hidden', s.sacks.length > 0);
   for (const k of s.sacks) {
     const card = el('div', 'fa-card');
+    card.draggable = true; card.dataset.key = k.key || '';
     const l1 = el('div', 'fa-l1');
     const name = el('span', 'fa-name');
-    const a = el('a', null, k.riderName); a.href = THREAD_URL(k.threadId); a.target = '_blank'; name.append(a);
+    const a = el('a', null, k.riderName); a.href = THREAD_URL(k.threadId); a.target = '_blank'; a.draggable = false; name.append(a);
     l1.append(name);
     l1.append(stat('Age', k.rider.a != null ? k.rider.a : '—'));
     l1.append(stat('OVL', k.rider.o != null ? Math.round(k.rider.o) : '—'));
@@ -234,12 +281,13 @@ function renderFA(s) {
 
   for (const f of s.fa) {
     const card = el('div', 'fa-card' + (f.a.amILeading ? ' lead' : ''));
+    card.draggable = true; card.dataset.key = f.key || '';
 
     // ---- top line: identity · evaluation · status · updated ----
     const l1 = el('div', 'fa-l1');
     const name = el('span', 'fa-name');
     if (f.threadId) {
-      const a = el('a', null, f.rider.n); a.href = THREAD_URL(f.threadId); a.target = '_blank'; name.append(a);
+      const a = el('a', null, f.rider.n); a.href = THREAD_URL(f.threadId); a.target = '_blank'; a.draggable = false; name.append(a);
     } else {
       name.append(el('span', null, f.rider.n));
     }
@@ -308,9 +356,10 @@ function renderDeals(s) {
 
   for (const d of s.deals) {
     const tr = el('tr');
+    tr.draggable = true; tr.dataset.key = d.key || '';
     if (d.involvesMe && !d.voided) tr.classList.add('lead'); // green highlight for your live deals
     const th = el('td', 'thread');
-    const a = el('a', null, d.title || `Thread ${d.threadId}`); a.href = THREAD_URL(d.threadId); a.target = '_blank';
+    const a = el('a', null, d.title || `Thread ${d.threadId}`); a.href = THREAD_URL(d.threadId); a.target = '_blank'; a.draggable = false;
     th.append(a);
     if (d.teams && d.teams.length === 2) {
       const sub = el('div', 'sub');

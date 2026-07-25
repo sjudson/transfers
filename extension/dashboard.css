@@ -105,6 +105,10 @@ input:focus,select:focus{outline:none;border-color:var(--accent)}
 .fa-list{display:flex;flex-direction:column;gap:6px}
 .fa-card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
 .fa-card.lead{background:var(--lead);border-color:#1c5a44}
+/* drag-to-reorder affordance (free-agent / sack cards + deal rows) */
+.fa-card[draggable="true"],#dealBody tr[draggable="true"]{cursor:grab}
+.fa-card.dragging,#dealBody tr.dragging{opacity:.45;cursor:grabbing}
+#dealBody tr.dragging{background:var(--panel2)}
 .fa-l1{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 .fa-name{font-weight:600;font-size:13px}
 .fa-name a{color:var(--accent);text-decoration:none}
