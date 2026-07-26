@@ -1,6 +1,6 @@
 // App controller: config, the rate-limited refresh loop, thread discovery,
 // incremental fetching, and derived totals. Everything runs in this page.
-import { kv } from './db.js';
+import { kv, httpCache } from './db.js';
 import { fetchPage } from './net.js';
 import { parseListing, parseThread, newestPostStamp } from './parse.js';
 import { computeDisplayOffsetMin } from './tz.js';
@@ -23,7 +23,7 @@ const FA_FORUM = 396;   // [Man-Game] Transfers: Free Agents (default)
 const DEAL_FORUM = 397; // [Man-Game] Transfers: Deals (default)
 // Bump when the snapshot schema or parsing logic changes, so stale cached
 // snapshots are discarded and everything is re-read with the current code.
-const DATA_VERSION = 13; // bump to full re-crawl and recover bids missed by the sticky-break bug
+const DATA_VERSION = 14; // bump to flush the HTTP cache and recover from bad-304 stale bodies
 
 // faForum/dealForum are configurable so the tool can be pointed at an old
 // season's forums for testing, or reused in future seasons, without a rebuild.
@@ -75,7 +75,12 @@ async function saveSnapshots() {
 }
 async function loadSnapshots() {
   const s = await kv.get('snapshots');
-  if (!s || s.version !== DATA_VERSION) return; // stale schema -> re-read fresh
+  if (!s || s.version !== DATA_VERSION) {
+    // Upgrading past a stale schema: also flush the HTTP cache so we don't rebuild
+    // from bodies cached under the old (possibly bad-304-stale) behaviour.
+    if (s) await httpCache.clear().catch(() => {});
+    return; // re-read fresh
+  }
   if (s.offsetMin != null) offsetMin = s.offsetMin;
   for (const [k, v] of s.faSnap || []) faSnap.set(+k, v);
   for (const [k, v] of s.dealSnap || []) dealSnap.set(+k, v);

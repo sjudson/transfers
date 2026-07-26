@@ -1,10 +1,17 @@
-// Rate-limited, cached, conditional fetching of pcmdaily.com pages.
+// Rate-limited, cached fetching of pcmdaily.com pages.
 //
 // Guarantees against hammering upstream:
 //  * concurrency 1 (a serial queue) + a hard minimum gap between network hits;
-//  * per-URL TTL: within TTL we serve the cached body with NO network hit;
-//  * conditional GET (If-None-Match / If-Modified-Since) so unchanged pages
-//    come back as 304 with an empty body.
+//  * per-URL TTL: within TTL we serve the cached body with NO network hit.
+//
+// We deliberately do NOT send conditional-GET validators (If-None-Match /
+// If-Modified-Since). pcmdaily (PHP-Fusion) ties a thread's Last-Modified to the
+// *viewer's* read tracking, so reading a thread on another device advances your
+// server-side read marker and the server then answers our conditional GET with a
+// 304 even though a new post changed the content — leaving us serving the stale
+// cached body (e.g. "you're still leading" after being outbid). Full GETs, still
+// throttled by the queue + per-URL TTL, keep us gentle without that correctness
+// hole. See DATA_VERSION bump that flushes any already-stale cache on upgrade.
 import { httpCache } from './db.js';
 
 const ORIGIN = 'https://pcmdaily.com';
@@ -52,9 +59,9 @@ export async function fetchPage(url, opts = {}) {
   }
 
   return schedule(async () => {
+    // No conditional-GET validators on purpose (see file header): the server's
+    // 304s are unreliable for our change-detection, so we always take the body.
     const headers = {};
-    if (cached?.etag) headers['If-None-Match'] = cached.etag;
-    if (cached?.lastModified) headers['If-Modified-Since'] = cached.lastModified;
 
     let resp;
     try {

@@ -52,6 +52,7 @@ export const httpCache = {
   get: (url) => tx('httpc', 'readonly', (s) => req(s.get(url))),
   put: (rec) => tx('httpc', 'readwrite', (s) => req(s.put(rec))),
   del: (url) => tx('httpc', 'readwrite', (s) => req(s.delete(url))),
+  clear: () => tx('httpc', 'readwrite', (s) => req(s.clear())),
 };
 
 export const threadStore = {
