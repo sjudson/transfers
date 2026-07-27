@@ -68,6 +68,11 @@ function listingRows(doc) {
       if (/^\d+$/.test(t)) nums.push(+t);
     }
     const sticky = !!row.querySelector('img[src*="stickythread"]');
+    // A locked thread's row shows a padlock folder icon. On pcmdaily this is
+    // `…/forum/folderlock.gif` with alt="Locked Thread" (normal threads use
+    // folder.gif alt="No New Posts"). Match either the "lock" filename or the
+    // alt text so it survives a theme swap.
+    const locked = !!row.querySelector('img[src*="lock" i], img[alt*="lock" i]');
     out.push({
       threadId: id,
       title: (a.textContent || '').trim(),
@@ -75,7 +80,7 @@ function listingRows(doc) {
       // heuristic: views is usually the larger, replies the smaller trailing count
       replies: nums.length >= 2 ? nums[nums.length - 1] : (nums[0] ?? null),
       views: nums.length >= 2 ? nums[nums.length - 2] : null,
-      sticky,
+      sticky, locked,
     });
   }
   return out;
@@ -115,8 +120,22 @@ export function parseThread(html) {
     title,
     headerClock: parseHeaderClock(doc),
     posts,
+    locked: threadLocked(doc),
     rowstarts: Array.from(rowstarts).sort((a, b) => a - b),
   };
+}
+
+// Detect a locked thread from its page. PHP-Fusion shows a "this thread is
+// locked" notice and/or a padlock in the page chrome — NOT inside a post — so we
+// strip the post bodies first (a post that merely says "locked" must not trigger
+// it). Used to auto-discard invalid/locked threads even when auto-discovered.
+function threadLocked(doc) {
+  const chrome = doc.cloneNode(true);
+  chrome.querySelectorAll('td.forum_thread_user_post').forEach((n) => n.remove());
+  const text = (chrome.body ? chrome.body.textContent : '') || '';
+  if (/\b(thread|topic)\s+(is|has been)\s+locked\b/i.test(text)) return true;
+  if (/\bcannot\s+(post|make)\s+(replies|further)/i.test(text) && /\block/i.test(text)) return true;
+  return !!chrome.querySelector("img[src*='lockthread' i], img[src*='thread_lock' i], img[src*='folder_lock' i]");
 }
 
 // The stamp of the newest post we actually parsed (posts are chronological, so

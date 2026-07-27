@@ -272,6 +272,43 @@ console.log('\n[parse real samples]');
   eq('null on empty', parse.newestPostStamp([]), null);
 }
 
+// ============ locked-thread detection (invalid threads → discard) ===========
+console.log('\n[locked-thread detection]');
+{
+  // listing: a locked row shows a padlock icon. Real pcmdaily markup (thread
+  // 32087): src=".../forum/folderlock.gif" alt="Locked Thread"; normal threads
+  // use folder.gif alt="No New Posts".
+  const lockList = `<!doctype html><html><body><table>
+    <tr><td><a href='viewthread.php?thread_id=555'>Locked</a></td>
+        <td><img src='../themes/Bluescape/forum/folderlock.gif' alt='Locked Thread'/></td>
+        <td>01-01-2026 10:00<br><span class='small'>by <a href='#'>u</a></span></td></tr>
+    <tr><td><a href='viewthread.php?thread_id=556'>Open</a></td>
+        <td><img src='../themes/Bluescape/forum/folder.gif' alt='No New Posts'/></td>
+        <td>01-01-2026 11:00<br><span class='small'>by <a href='#'>u</a></span></td></tr>
+    <tr><td><a href='viewthread.php?thread_id=557'>AltOnly</a></td>
+        <td><img src='../themes/Other/forum/f2.gif' alt='Locked Thread'/></td>
+        <td>01-01-2026 12:00<br><span class='small'>by <a href='#'>u</a></span></td></tr>
+  </table></body></html>`;
+  const lrows = parse.parseForumListing(lockList);
+  ok('locked listing row flagged (folderlock.gif)', lrows.find((r) => r.threadId === 555)?.locked === true);
+  ok('normal listing row not flagged', lrows.find((r) => r.threadId === 556)?.locked === false);
+  ok('locked via alt="Locked Thread" only', lrows.find((r) => r.threadId === 557)?.locked === true);
+
+  const thread = (chrome, postBody) => `<!doctype html><html><body>
+    <div class='forum_thread_title'>[Free Agent] X</div>
+    <table>
+      <tr><td class='forum_thread_user_name'><a class='profile-link' href='#'>u</a></td>
+          <td class='forum_thread_post_date'><a id='post_1'></a><div class='small'>Posted on 01-01-2026 10:00</div></td></tr>
+      <tr><td>info</td><td class='forum_thread_user_post'>${postBody}</td></tr>
+    </table>${chrome}</body></html>`;
+  ok('locked notice in page chrome → locked',
+     parse.parseThread(thread('<div>This thread is locked. You cannot post replies.</div>', 'Team\n60000')).locked === true);
+  ok('"locked" only inside a post → NOT locked',
+     parse.parseThread(thread('', 'Team\n60000\nI am locked in — this thread is locked to me!')).locked === false);
+  ok('normal thread → not locked',
+     parse.parseThread(thread('<div>Reply</div>', 'Team\n60000')).locked === false);
+}
+
 // ============ realistic bid thread (observed markup + a quote) =============
 console.log('\n[parse+analyze a realistic bid thread]');
 {
@@ -677,6 +714,21 @@ console.log('\n[applyManualOrder]');
   // stale keys in the order that aren't present are simply ignored
   eq('stale keys ignored', keyStr(model.applyManualOrder(items, ['z', 'c', 'y', 'a'])), 'cabd');
   ok('returns a copy (does not mutate input)', model.applyManualOrder(items, ['b', 'a']) !== items && keyStr(items) === 'abcd');
+}
+
+console.log('\n[faSection / dealSection]');
+{
+  eq('FA won → you', model.faSection({ key: 'won' }), 'you');
+  eq('FA gone → others', model.faSection({ key: 'gone' }), 'others');
+  eq('FA open → active', model.faSection({ key: 'open' }), 'active');
+  eq('FA closing → active', model.faSection({ key: 'closing' }), 'active');
+  eq('FA nobids → active', model.faSection({ key: 'nobids' }), 'active');
+  eq('FA no status → active', model.faSection(null), 'active');
+
+  eq('deal completed + mine → you', model.dealSection({ completed: true, voided: false, involvesMe: true }), 'you');
+  eq('deal completed + third-party → others', model.dealSection({ completed: true, voided: false, involvesMe: false }), 'others');
+  eq('deal pending → active', model.dealSection({ completed: false, involvesMe: true }), 'active');
+  eq('deal voided (even if completed) → active', model.dealSection({ completed: true, voided: true, involvesMe: true }), 'active');
 }
 
 console.log('\n[transaction CSV export]');

@@ -46,7 +46,8 @@ let listing = new Map();            // threadId -> {title, lastPostStamp, forum}
 let riderThread = new Map();        // riderId -> threadId
 let highWater = {};                 // forumId -> newest last-post UTC ms processed
 let autoFa = new Set();             // threadIds auto-discovered because YOU bid there
-let faIgnore = new Set();           // threadIds you dismissed from the FA list
+let faIgnore = new Set();           // threadIds you dismissed / that were locked (FA)
+let dealIgnore = new Set();         // threadIds you dismissed / that were locked (deals)
 const faSnap = new Map();           // threadId -> {analysis, title, kind, updatedUtc, latestStamp, sack…}
 const dealSnap = new Map();         // threadId -> {title, involvesMe, lastPostUtc, figures, updatedUtc}
 const pending = makeQueue();        // FIFO work queue of "forum:threadId" keys (persisted)
@@ -69,7 +70,7 @@ async function saveSnapshots() {
     offsetMin,
     faSnap: [...faSnap], dealSnap: [...dealSnap],
     riderThread: [...riderThread], listing: [...listing],
-    autoFa: [...autoFa], faIgnore: [...faIgnore], highWater,
+    autoFa: [...autoFa], faIgnore: [...faIgnore], dealIgnore: [...dealIgnore], highWater,
     pending: pending.toArray(), crawlState, initDone, version: DATA_VERSION,
   });
 }
@@ -88,6 +89,7 @@ async function loadSnapshots() {
   for (const [k, v] of s.listing || []) listing.set(+k, v);
   autoFa = new Set((s.autoFa || []).map(Number));
   faIgnore = new Set((s.faIgnore || []).map(Number));
+  dealIgnore = new Set((s.dealIgnore || []).map(Number));
   pending.load(s.pending || []);
   Object.assign(crawlState, s.crawlState || {});
   initDone = !!s.initDone;
@@ -97,7 +99,7 @@ async function loadSnapshots() {
 // Discard everything auto-discovered (keeps manual cfg: shortlist/faThreads/deals).
 async function wipeAuto() {
   listing.clear(); faSnap.clear(); dealSnap.clear();
-  autoFa.clear(); faIgnore.clear(); riderThread.clear();
+  autoFa.clear(); faIgnore.clear(); dealIgnore.clear(); riderThread.clear();
   pending.clear();
   for (const k of Object.keys(crawlState)) delete crawlState[k];
   highWater = {}; initDone = false; initializing = true;
@@ -127,6 +129,14 @@ function cst(f) { return (crawlState[f] ??= { cursor: 0, initDone: false }); }
 function enqueueChanged(forumId, r) {
   listing.set(r.threadId, { title: r.title, lastPostStamp: r.lastPostStamp, forum: forumId });
   const isFa = forumId === cfg.faForum;
+  // A locked thread is invalid to track — remember it so it's never fetched or
+  // shown, even though the auto-finder keeps seeing it on the listing. Also drop
+  // any snapshot so it also leaves the admin facts, not just the personal view.
+  if (r.locked) {
+    if (isFa) { faIgnore.add(r.threadId); faSnap.delete(r.threadId); autoFa.delete(r.threadId); }
+    else { dealIgnore.add(r.threadId); dealSnap.delete(r.threadId); }
+    return;
+  }
   if (isFa) {
     const rider = riderFromThreadTitle(r.title);
     if (rider && !riderThread.has(rider.id)) riderThread.set(rider.id, r.threadId);
@@ -177,6 +187,7 @@ async function fetchThreadPosts(threadId, ttlMs) {
   calibrate(p1, first.fetchedAtUtcMs);
   let posts = p1.posts;
   let title = p1.title;
+  let locked = p1.locked;
   const maxStart = Math.max(...p1.rowstarts);
   if (maxStart > 0) {
     const last = await fetchPage(`viewthread.php?thread_id=${threadId}&rowstart=${maxStart}`, { ttlMs });
@@ -185,14 +196,16 @@ async function fetchThreadPosts(threadId, ttlMs) {
       calibrate(p2, last.fetchedAtUtcMs);
       const seen = new Set(posts.map((p) => p.postId));
       posts = posts.concat(p2.posts.filter((p) => !seen.has(p.postId)));
+      locked = locked || p2.locked; // lock notice lives on the last page
     }
   }
-  return { title, posts };
+  return { title, posts, locked };
 }
 
 async function fetchFaThread(threadId) {
   const t = await fetchThreadPosts(threadId, cfg.refreshSec * 1000).catch(() => null);
   if (!t) return;
+  if (t.locked) { faIgnore.add(threadId); autoFa.delete(threadId); faSnap.delete(threadId); return; } // locked → discard
   const title = t.title || listing.get(threadId)?.title || '';
   const kind = faThreadKind(title) || 'fa';
   const analysis = analyzeFreeAgentThread(t.posts, offsetMin, cfg.myTeam, openingMinFor(title));
@@ -223,6 +236,7 @@ async function fetchFaThread(threadId) {
 async function fetchDealThread(threadId) {
   const t = await fetchThreadPosts(threadId, cfg.refreshSec * 1000).catch(() => null);
   if (!t) return;
+  if (t.locked) { dealIgnore.add(threadId); dealSnap.delete(threadId); return; } // locked → discard
   const wageOf = (name) => { const r = riderByName(name); return r ? (r.w || 0) : null; };
   // Use the winning (highest-money) offer in a bidding-war thread, not the OP.
   const fig = dealFigures(winningDealText(t.posts), cfg.myTeam, wageOf);
@@ -408,8 +422,10 @@ function buildState() {
       figures, display,
     });
   };
-  for (const [tid, snap] of dealSnap) if (snap.involvesMe) addDeal(tid, snap);
-  for (const tid of cfg.deals) addDeal(tid, dealSnap.get(tid));
+  // auto-detected (your team is a principal) + manually added — minus dismissed
+  // and locked threads, which stay hidden even though your team is mentioned.
+  for (const [tid, snap] of dealSnap) if (snap.involvesMe && !dealIgnore.has(tid)) addDeal(tid, snap);
+  for (const tid of cfg.deals) if (!dealIgnore.has(tid)) addDeal(tid, dealSnap.get(tid));
 
   // sacks: only the ones YOUR team made (the [Sack] opening post's team == you).
   const nMy = norm(cfg.myTeam || '');
@@ -582,13 +598,19 @@ const handlers = {
   },
   async addDeal(input) {
     const id = parseThreadId(input);
-    if (id && !cfg.deals.includes(id)) {
-      cfg.deals.push(id);
-      pending.unshift(cfg.dealForum + ':' + id);
-      await saveCfg(); await saveSnapshots(); render();
-    }
+    if (!id) return;
+    dealIgnore.delete(id); // manually re-adding un-dismisses it
+    if (!cfg.deals.includes(id)) cfg.deals.push(id);
+    pending.unshift(cfg.dealForum + ':' + id);
+    await saveCfg(); await saveSnapshots(); render();
   },
-  async removeDeal(id) { cfg.deals = cfg.deals.filter((x) => x !== id); await saveCfg(); render(); },
+  // Dismiss a deal: remove any manual entry AND remember it, so an auto-detected
+  // deal (your team is a principal) doesn't immediately reappear.
+  async removeDeal(id) {
+    cfg.deals = cfg.deals.filter((x) => x !== id);
+    dealIgnore.add(id);
+    await saveCfg(); await saveSnapshots(); render();
+  },
 };
 
 // ---- boot ------------------------------------------------------------------

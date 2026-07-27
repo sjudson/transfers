@@ -204,6 +204,17 @@ export function applyManualOrder(items, order) {
     .map((x) => x[0]);
 }
 
+// Which section a card belongs to in the split lists: 'you' (completed, went to
+// you), 'others' (completed, went elsewhere), or 'active' (still in progress).
+export function faSection(status) {
+  const k = status && status.key;
+  return k === 'won' ? 'you' : k === 'gone' ? 'others' : 'active';
+}
+export function dealSection(d) {
+  if (d && d.completed && !d.voided) return d.involvesMe ? 'you' : 'others';
+  return 'active'; // pending or voided deals stay in the main body
+}
+
 // Status label for a free-agent thread given "now".
 export function faStatus(a, nowUtc) {
   if (a.leadingAmount == null) return { key: 'nobids', label: 'No valid bids' };

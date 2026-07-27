@@ -105,6 +105,14 @@ input:focus,select:focus{outline:none;border-color:var(--accent)}
 .fa-list{display:flex;flex-direction:column;gap:6px}
 .fa-card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
 .fa-card.lead{background:var(--lead);border-color:#1c5a44}
+.fa-card.done-other{opacity:.68}
+/* section subheaders splitting completed-to-you / active / completed-to-others */
+.list-subhead{color:var(--sub);font-size:11px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.05em;padding:6px 2px 2px;border-top:1px solid var(--line);margin-top:2px}
+.fa-list .list-subhead:first-child{border-top:none;margin-top:0;padding-top:0}
+#dealBody tr.drophead td{color:var(--sub);font-size:11px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.05em;background:var(--panel2);padding:5px 8px}
+#dealBody tr.done-other{opacity:.7}
 /* drag-to-reorder affordance (free-agent / sack cards + deal rows) */
 .fa-card[draggable="true"],#dealBody tr[draggable="true"]{cursor:grab}
 .fa-card.dragging,#dealBody tr.dragging{opacity:.45;cursor:grabbing}

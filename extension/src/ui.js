@@ -1,6 +1,6 @@
 // Rendering + static event wiring. Pure-ish: render(state) reflects app state
 // into the DOM; setup(handlers) binds one-time listeners.
-import { fmtEuro, DEAL_TYPE_LABEL } from './model.js';
+import { fmtEuro, DEAL_TYPE_LABEL, faSection, dealSection } from './model.js';
 import { fmtBst, fmtDuration } from './tz.js';
 import { searchRiders, allTeams } from './ridersdb.js';
 
@@ -99,7 +99,7 @@ export function setup(handlers) {
   // drag-to-reorder the card lists (delegated, so it survives re-renders)
   setupDrag($('faList'), 'fa', '.fa-card');
   setupDrag($('sackList'), 'sack', '.fa-card');
-  setupDrag($('dealBody'), 'deal', 'tr');
+  setupDrag($('dealBody'), 'deal', 'tr.deal-row');
   // track the pointer for edge auto-scroll even past a list's bounds
   document.addEventListener('dragover', (e) => { if (dragging) dragPointerY = e.clientY; });
 
@@ -298,14 +298,31 @@ function stat(label, val) {
   return s;
 }
 
+// Split a list into completed-to-you / active / completed-to-others sections and
+// render each (with a subheader) into the container. The "Active" divider only
+// appears when there's a completed-to-you block above it to separate from.
+// makeItem(item) -> element; makeHead(text) -> a subheader element.
+function renderSections(container, items, sectionOf, makeItem, makeHead) {
+  const you = [], active = [], others = [];
+  for (const it of items) { const g = sectionOf(it); (g === 'you' ? you : g === 'others' ? others : active).push(it); }
+  if (you.length) container.append(makeHead('Completed (to you)'));
+  for (const it of you) container.append(makeItem(it));
+  if (you.length && active.length) container.append(makeHead('Active'));
+  for (const it of active) container.append(makeItem(it));
+  if (others.length) container.append(makeHead('Completed (to others)'));
+  for (const it of others) container.append(makeItem(it));
+}
+
 function renderFA(s) {
   const list = $('faList');
   list.innerHTML = '';
   $('faCount').textContent = s.fa.length ? `(${s.fa.length})` : '';
   $('faEmpty').classList.toggle('hidden', s.fa.length > 0);
+  renderSections(list, s.fa, (f) => faSection(f.status), (f) => faCard(f, s), (t) => el('div', 'list-subhead', t));
+}
 
-  for (const f of s.fa) {
-    const card = el('div', 'fa-card' + (f.a.amILeading ? ' lead' : ''));
+function faCard(f, s) {
+    const card = el('div', 'fa-card' + (f.a.amILeading ? ' lead' : '') + (faSection(f.status) === 'others' ? ' done-other' : ''));
     card.draggable = true; card.dataset.key = f.key || '';
 
     // ---- top line: identity · evaluation · status · updated ----
@@ -368,8 +385,7 @@ function renderFA(s) {
     l2.append(stat('Min next', fmtEuro(f.a.minNextBid)));
     card.append(l2);
 
-    list.append(card);
-  }
+    return card;
 }
 
 function renderDeals(s) {
@@ -379,8 +395,12 @@ function renderDeals(s) {
   $('dealEmpty').classList.toggle('hidden', s.deals.length > 0);
   $('dealTable').closest('.tablewrap').classList.toggle('hidden', s.deals.length === 0);
 
-  for (const d of s.deals) {
-    const tr = el('tr');
+  const head = (t) => { const tr = el('tr', 'drophead'); const td = el('td', null, t); td.colSpan = 8; tr.append(td); return tr; };
+  renderSections(body, s.deals, dealSection, (d) => dealRow(d, s), head);
+}
+
+function dealRow(d, s) {
+    const tr = el('tr', 'deal-row' + (dealSection(d) === 'others' ? ' done-other' : ''));
     tr.draggable = true; tr.dataset.key = d.key || '';
     if (d.involvesMe && !d.voided) tr.classList.add('lead'); // green highlight for your live deals
     const th = el('td', 'thread');
@@ -417,8 +437,7 @@ function renderDeals(s) {
     tr.append(ts);
     const rm = el('td'); const x = el('span', 'x', '✕'); x.title = 'Stop tracking'; x.onclick = () => H.removeDeal(d.threadId); rm.append(x);
     tr.append(rm);
-    body.append(tr);
-  }
+    return tr;
 }
 
 // Read-only money cell: coloured value (green = back to you), or greyed "n/a".
