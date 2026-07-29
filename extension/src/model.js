@@ -279,16 +279,22 @@ export function parseDeal(opText) {
 
 // A deal thread can be a bidding war (the price escalates across posts as teams
 // out-bid each other). The winning deal is the one that moved the most money —
-// pick that post's terms rather than the opening proposal.
-export function winningDealText(posts) {
-  let best = '', bestFee = -1;
+// and, on ties, the LATEST such post (the final over-the-top confirmation). We
+// return that post so callers get both its terms and its timestamp (the 24h
+// window is anchored to when the winning offer was confirmed, not the OP).
+export function winningDealPost(posts) {
+  let best = null, bestFee = -1;
   for (const p of posts || []) {
     const d = parseDeal(p.text || '');
     if (!d.teamA.name || !d.teamB.name) continue;
     const fee = Math.max(d.teamA.moneyOut || 0, d.teamA.moneyIn || 0, d.teamB.moneyOut || 0, d.teamB.moneyIn || 0);
-    if (fee >= bestFee) { bestFee = fee; best = p.text; } // >= : a later re-post wins ties
+    if (fee >= bestFee) { bestFee = fee; best = p; } // >= : a later re-post wins ties
   }
-  return best || (posts?.[0]?.text || '');
+  return best;
+}
+export function winningDealText(posts) {
+  const p = winningDealPost(posts);
+  return (p && p.text) || (posts?.[0]?.text || '');
 }
 
 // Your-perspective figures for a deal. wageOf(name) -> wage or null (unknown).

@@ -12,7 +12,7 @@ import {
 } from './ridersdb.js';
 import { setupAdmin, refreshAdmin } from './admin-gate.js';
 import {
-  analyzeFreeAgentThread, faStatus, dailyUsage, computeTotals, dealFigures, winningDealText, dedupeFaByRider, parseSackPost,
+  analyzeFreeAgentThread, faStatus, dailyUsage, computeTotals, dealFigures, winningDealPost, dedupeFaByRider, parseSackPost,
   openingMinFor, faThreadKind, fmtBand, dealType, rosterCounts, parseDeal, countsAsJunior, applyManualOrder,
   JUNIOR_MIN, MIN_WAGE, DEAL_MS, FIRST_WINDOW_UTC, TRANSFER_CLOSE_UTC,
 } from './model.js';
@@ -239,17 +239,23 @@ async function fetchDealThread(threadId) {
   if (t.locked) { dealIgnore.add(threadId); dealSnap.delete(threadId); return; } // locked → discard
   const wageOf = (name) => { const r = riderByName(name); return r ? (r.w || 0) : null; };
   // Use the winning (highest-money) offer in a bidding-war thread, not the OP.
-  const fig = dealFigures(winningDealText(t.posts), cfg.myTeam, wageOf);
-  // Anchor the 24h close to the deal proposal: the EARLIEST post time. Deals
-  // confirm within a day of the OP, and using the minimum stamp ignores later
-  // comments/re-posts and is robust to a missing/garbled opening-post stamp.
-  let lastPostUtc = Infinity;
-  for (const p of t.posts) { const ps = parseForumStamp(p.stampStr); if (ps) { const u = stampToUtcMs(ps, offsetMin); if (u < lastPostUtc) lastPostUtc = u; } }
-  if (!isFinite(lastPostUtc)) lastPostUtc = Date.now();
+  const winner = winningDealPost(t.posts);
+  const winnerText = (winner && winner.text) || (t.posts[0]?.text || '');
+  const fig = dealFigures(winnerText, cfg.myTeam, wageOf);
+  // Anchor the 24h close to the WINNING deal's post — for a bidding war that's the
+  // over-the-top confirmation, not the original proposal. Fall back to the earliest
+  // valid stamp (then now) if the winning post's stamp is missing/garbled.
+  let lastPostUtc = null;
+  if (winner) { const ps = parseForumStamp(winner.stampStr); if (ps) lastPostUtc = stampToUtcMs(ps, offsetMin); }
+  if (lastPostUtc == null) {
+    let min = Infinity;
+    for (const p of t.posts) { const ps = parseForumStamp(p.stampStr); if (ps) { const u = stampToUtcMs(ps, offsetMin); if (u < min) min = u; } }
+    lastPostUtc = isFinite(min) ? min : Date.now();
+  }
   // Voided/cancelled deals: a later post declares it off (excluded from totals).
   const voided = t.posts.slice(1).some((p) => /\b(void(ed)?|cancell?ed)\b/i.test(p.text || ''));
   // team-agnostic winning-deal blocks for the admin aggregator (both sides)
-  const wd = parseDeal(winningDealText(t.posts));
+  const wd = parseDeal(winnerText);
   dealSnap.set(threadId, {
     title: t.title || listing.get(threadId)?.title, voided,
     involvesMe: fig.involvesMe, isLoan: fig.isLoan, mySide: fig.mySide,
@@ -614,11 +620,26 @@ const handlers = {
 };
 
 // ---- boot ------------------------------------------------------------------
+// One-time data migrations that don't warrant discarding all snapshots (which
+// would wipe the locked/discard memory and force a full re-crawl).
+async function runMigrations() {
+  const done = (await kv.get('migrations')) || {};
+  // Deal 24h anchor moved from the OP to the winning (over-the-top) post. Existing
+  // deal snapshots were anchored to the OP; re-enqueue every known deal so it is
+  // re-parsed with the new anchor (a cache hit is fine — only the parse changed).
+  if (!done.dealAnchorV2) {
+    for (const tid of new Set([...dealSnap.keys(), ...cfg.deals])) pending.push(cfg.dealForum + ':' + tid);
+    done.dealAnchorV2 = true;
+    await kv.set('migrations', done);
+  }
+}
+
 async function boot() {
   await loadDb();
   await loadCfg();
   await loadHighWater();
   await loadSnapshots();
+  await runMigrations();
   // expose formatters to the ticker without re-importing
   const tz = await import('./tz.js');
   window.__tzfmt = { fmtBst: tz.fmtBst, fmtDuration: tz.fmtDuration };

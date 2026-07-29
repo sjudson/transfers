@@ -238,6 +238,19 @@ console.log('\n[wage bands + deal types]');
   const win = model.dealFigures(model.winningDealText(war), 'Cervelo', () => 90000);
   eq('winning deal fee = 200k (Cervelo pays)', win.transferFee, 200000);
   eq('winning buyer is me', win.involvesMe, true);
+  // the 24h anchors to the WINNING (over-the-top) post, so its stamp is available
+  const stamped = [
+    { text: war[0].text, stampStr: '28-07-2026 20:49' }, // original proposal
+    { text: war[2].text, stampStr: '28-07-2026 23:10' }, // over-the-top confirmation
+  ];
+  eq('winning post is the over-the-top one', model.winningDealPost(stamped).stampStr, '28-07-2026 23:10');
+  // on a tie (re-post of the same top figure) the LATER post wins
+  const tie = [
+    { text: war[2].text, stampStr: '28-07-2026 23:10' },
+    { text: war[2].text, stampStr: '28-07-2026 23:40' },
+  ];
+  eq('tie → latest post', model.winningDealPost(tie).stampStr, '28-07-2026 23:40');
+  ok('no deal posts → null', model.winningDealPost([{ text: 'just a comment' }]) === null);
 }
 
 // ============================ parse real HTML ==============================
