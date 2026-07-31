@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ManGame Transfer Tracker</title>
+  <script src="theme-init.js"></script>
   <link rel="stylesheet" href="dashboard.css" />
 </head>
 <body>
@@ -15,6 +16,10 @@
     <div class="status">
       <span id="bstClock" class="pill" title="Current time in BST">—</span>
       <span id="refreshInfo" class="pill" title="Automatic update countdown">next update in —</span>
+      <label class="theme-switch" title="Toggle light / dark mode">
+        <input type="checkbox" id="themeToggle" />
+        <span class="theme-track"><span class="theme-thumb"></span></span>
+      </label>
       <button id="adminBtn" class="btn ghost" title="Admin panel (access code required)">Admin</button>
     </div>
   </header>
@@ -180,7 +185,6 @@
     </section>
 
     <footer class="foot">
-      Read-only. Data cached locally (IndexedDB). Times shown in BST. Rider database: bundled snapshot.
       <span id="tzInfo" class="subtle"></span>
     </footer>
   </main>

@@ -2,8 +2,32 @@
   --bg:#0f1420; --panel:#161c2b; --panel2:#1b2233; --line:#28324a;
   --ink:#e7ecf5; --muted:#93a0b8; --sub:#6b7890;
   --accent:#60a5fa; --good:#34d399; --bad:#f87171; --warn:#fbbf24;
-  --lead:#0e2f24; --leadink:#6ee7b7;
+  --lead:#0e2f24; --leadink:#6ee7b7; --btn-ink:#06101f; --overlay:rgba(4,8,15,.72);
 }
+/* Light theme: override the palette + the hardcoded chip/banner colors. */
+html.light{
+  --bg:#f5f7fb; --panel:#ffffff; --panel2:#eceff5; --line:#d5dbe6;
+  --ink:#1b2432; --muted:#586274; --sub:#828d9e;
+  --accent:#2563eb; --good:#047d54; --bad:#dc2626; --warn:#b45309;
+  --lead:#b2e6c9; --leadink:#045c3c; --btn-ink:#ffffff; --overlay:rgba(30,41,59,.45);
+}
+html.light .banner.warn{background:#fee2e2;color:#b91c1c}
+html.light .banner.disclaimer{background:#fdf3d3;color:#8a6d0f;border-bottom-color:#ecd98c}
+html.light .banner.info{background:#e0ebfd;color:#1e40af}
+html.light .banner.init{background:#eef1f7;color:#3f4a5c}
+html.light .spinner{border-color:#cbd5e1;border-top-color:var(--accent)}
+html.light .jrsup,html.light .rider .jr{color:#b45309}
+html.light .rider .jr{background:#fdf0d3}
+html.light .rider .jr.sack{color:#b91c1c;background:#fee2e2}
+html.light .fa-card.lead{border-color:#6cc298}
+html.light tr.lead:hover td{background:#a3dfba}
+html.light .badge.other,html.light .badge.gone,html.light .badge.type-swap{background:#f3e8ff;color:#7e22ce}
+html.light .badge.open,html.light .badge.done,html.light .badge.type-loan-in,html.light .badge.type-loan{background:#e0ebfd;color:#1d4ed8}
+html.light .badge.won,html.light .badge.win-open,html.light .badge.type-buy,html.light .badge.type-transfer{background:#bcefcf;color:#14672f}
+html.light .badge.voided,html.light .badge.win-closed{background:#fee2e2;color:#b91c1c}
+html.light .badge.closing{background:#fdf0d3}
+html.light .badge.type-sell{background:#ffedd5;color:#c2410c}
+html.light .badge.type-loan-out{background:#dde8f5;color:#1e5a8a}
 *{box-sizing:border-box}
 html,body{margin:0}
 body{
@@ -26,10 +50,19 @@ small{color:var(--sub);font-weight:400}
 @keyframes pulse{50%{opacity:.3}}
 .status{display:flex;align-items:center;gap:8px}
 .pill{background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.btn{background:var(--accent);color:#06101f;border:none;border-radius:6px;padding:5px 12px;font-weight:600;cursor:pointer}
+.btn{background:var(--accent);color:var(--btn-ink);border:none;border-radius:6px;padding:5px 12px;font-weight:600;cursor:pointer}
 .btn:hover{filter:brightness(1.08)}
 .btn.small{padding:2px 8px;font-size:12px}
 .btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
+
+/* light / dark toggle: a small slider switch */
+.theme-switch{display:inline-flex;align-items:center;cursor:pointer}
+.theme-switch input{position:absolute;width:0;height:0;opacity:0}
+.theme-track{position:relative;width:38px;height:20px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);transition:background .15s}
+.theme-thumb{position:absolute;top:1px;left:1px;width:16px;height:16px;border-radius:50%;background:var(--muted);transition:transform .15s,background .15s}
+.theme-switch input:checked + .theme-track{background:var(--accent);border-color:var(--accent)}
+.theme-switch input:checked + .theme-track .theme-thumb{transform:translateX(18px);background:#fff}
+.theme-switch input:focus-visible + .theme-track{outline:2px solid var(--accent);outline-offset:2px}
 
 .banner{padding:9px 16px;font-size:13px;border-bottom:1px solid var(--line)}
 .banner.warn{background:#3a1414;color:#fca5a5}
@@ -44,7 +77,7 @@ small{color:var(--sub);font-weight:400}
 #adminFrame{display:block;width:100%;height:calc(100vh - 150px);border:0;background:var(--bg)}
 
 /* access-code modal */
-.modal{position:fixed;inset:0;background:rgba(4,8,15,.72);display:flex;align-items:center;justify-content:center;z-index:50}
+.modal{position:fixed;inset:0;background:var(--overlay);display:flex;align-items:center;justify-content:center;z-index:50}
 .modal-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;width:min(420px,92vw)}
 .modal-box h2{margin:0 0 4px}
 .modal-box input{width:100%;margin-top:8px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}

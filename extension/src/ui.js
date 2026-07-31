@@ -91,6 +91,17 @@ export function setup(handlers) {
   $('dealAdd').addEventListener('click', () => { H.addDeal($('dealInput').value.trim()); $('dealInput').value = ''; });
   $('faThreadAdd').addEventListener('click', () => { H.addFaThread($('faThreadInput').value.trim()); $('faThreadInput').value = ''; });
 
+  // light / dark theme toggle (theme-init.js applies the saved class pre-paint)
+  const themeToggle = $('themeToggle');
+  if (themeToggle) {
+    themeToggle.checked = document.documentElement.classList.contains('light');
+    themeToggle.addEventListener('change', () => {
+      const light = themeToggle.checked;
+      document.documentElement.classList.toggle('light', light);
+      try { localStorage.setItem('theme', light ? 'light' : 'dark'); } catch (e) {}
+    });
+  }
+
   // collapsible panels
   document.querySelectorAll('.panel-head').forEach((h) => {
     h.addEventListener('click', () => h.closest('.panel').classList.toggle('open'));
