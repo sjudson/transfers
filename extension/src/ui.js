@@ -421,7 +421,7 @@ function renderDeals(s) {
 function dealRow(d, s) {
     const tr = el('tr', 'deal-row' + (dealSection(d) === 'others' ? ' done-other' : ''));
     tr.draggable = true; tr.dataset.key = d.key || '';
-    if (d.involvesMe && !d.voided) tr.classList.add('lead'); // green highlight for your live deals
+    if (d.involvesMe && !d.voided && !d.superseded) tr.classList.add('lead'); // green highlight for your live deals
     const th = el('td', 'thread');
     const a = el('a', null, d.title || `Thread ${d.threadId}`); a.href = THREAD_URL(d.threadId); a.target = '_blank'; a.draggable = false;
     th.append(a);
@@ -443,13 +443,14 @@ function dealRow(d, s) {
     tr.append(moneyCell(d.display.loanFee));
     tr.append(moneyCell(d.display.salaryAdd));
 
-    // status: voided → completed → "closes in" countdown
+    // status: voided → superseded → completed → "closes in" countdown
     const stTd = el('td');
     if (d.voided) stTd.append(badge('voided', 'Voided'));
+    else if (d.superseded) { const b = badge('superseded', 'Superseded'); b.title = 'A later deal moved one of these riders again — this one no longer stands'; stTd.append(b); }
     else if (d.completed) stTd.append(badge('done', 'Completed'));
     else if (d.closeUtc) { const cd = el('span', 'cd'); cd.dataset.win = d.closeUtc; cd.textContent = 'closes in ' + fmtDuration(d.closeUtc - s.nowUtc); stTd.append(cd); }
     else stTd.textContent = '—';
-    if (d.voided) tr.classList.add('voided-row');
+    if (d.voided || d.superseded) tr.classList.add('voided-row');
     tr.append(stTd);
 
     const ts = el('td', 'subtle right', d.lastPostUtc ? fmtBst(d.lastPostUtc).replace(' BST', '') : '—');

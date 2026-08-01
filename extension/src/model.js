@@ -211,8 +211,9 @@ export function faSection(status) {
   return k === 'won' ? 'you' : k === 'gone' ? 'others' : 'active';
 }
 export function dealSection(d) {
-  if (d && d.completed && !d.voided) return d.involvesMe ? 'you' : 'others';
-  return 'active'; // pending or voided deals stay in the main body
+  if (!d || d.voided) return 'active';                        // voided stays in the main body
+  if (d.completed || d.superseded) return d.involvesMe ? 'you' : 'others'; // terminal → completed section
+  return 'active';                                            // still pending
 }
 
 // Status label for a free-agent thread given "now".
@@ -295,6 +296,32 @@ export function winningDealPost(posts) {
 export function winningDealText(posts) {
   const p = winningDealPost(posts);
   return (p && p.text) || (posts?.[0]?.text || '');
+}
+
+// Cross-deal supersession. A deal is superseded when a LATER (by opUtc) non-voided
+// deal involves any of the same riders — the rider was traded again, so the earlier
+// (often "Completed") deal no longer reflects reality (renegotiation reposts).
+// deals: [{ threadId, riders:[name], opUtc, voided }]. Returns a Set of superseded
+// threadIds. (Strictly later only, so simultaneous reposts don't cancel each other.)
+export function supersededDealIds(deals) {
+  const latest = new Map(); // norm(rider) -> newest opUtc among non-voided deals
+  for (const d of deals || []) {
+    if (d.voided || d.opUtc == null) continue;
+    for (const r of d.riders || []) {
+      const k = norm(r); if (!k) continue;
+      const cur = latest.get(k);
+      if (cur == null || d.opUtc > cur) latest.set(k, d.opUtc);
+    }
+  }
+  const out = new Set();
+  for (const d of deals || []) {
+    if (d.voided || d.opUtc == null) continue;
+    for (const r of d.riders || []) {
+      const k = norm(r); if (!k) continue;
+      if (latest.get(k) > d.opUtc) { out.add(d.threadId); break; }
+    }
+  }
+  return out;
 }
 
 // Your-perspective figures for a deal. wageOf(name) -> wage or null (unknown).

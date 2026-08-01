@@ -12,7 +12,7 @@ import {
 } from './ridersdb.js';
 import { setupAdmin, refreshAdmin } from './admin-gate.js';
 import {
-  analyzeFreeAgentThread, faStatus, dailyUsage, computeTotals, dealFigures, winningDealPost, dedupeFaByRider, parseSackPost,
+  analyzeFreeAgentThread, faStatus, dailyUsage, computeTotals, dealFigures, winningDealPost, supersededDealIds, dedupeFaByRider, parseSackPost,
   openingMinFor, faThreadKind, fmtBand, dealType, rosterCounts, parseDeal, countsAsJunior, applyManualOrder,
   JUNIOR_MIN, MIN_WAGE, DEAL_MS, FIRST_WINDOW_UTC, TRANSFER_CLOSE_UTC,
 } from './model.js';
@@ -399,6 +399,16 @@ function buildState() {
   fa.length = 0;
   fa.push(...faDedup);
 
+  // Cross-deal supersession: a rider re-appearing in a LATER deal invalidates the
+  // earlier deals involving them (renegotiation reposts leave stale "Completed"
+  // deals). Computed across ALL known deals, not just the user's.
+  const supersedeInput = [];
+  for (const [tid, snap] of dealSnap) {
+    const a = snap.admin && snap.admin.a ? snap.admin.a : {};
+    supersedeInput.push({ threadId: tid, riders: [...(a.out || []), ...(a.in || [])], opUtc: snap.lastPostUtc ?? null, voided: !!snap.voided });
+  }
+  const supersededIds = supersededDealIds(supersedeInput);
+
   // deals: include auto-detected (involvesMe) + manually added
   const deals = [];
   const shown = new Set();
@@ -421,7 +431,7 @@ function buildState() {
       : { transferFee: isLoan ? null : (snap?.dealFee ?? null), loanFee: isLoan ? (snap?.dealFee ?? null) : null, salaryAdd: null };
     deals.push({
       threadId, title: snap?.title || listing.get(threadId)?.title,
-      involvesMe, isLoan, type, voided: !!snap?.voided, mySide: snap?.mySide || null,
+      involvesMe, isLoan, type, voided: !!snap?.voided, superseded: supersededIds.has(threadId), mySide: snap?.mySide || null,
       ridersIn: snap?.ridersIn || [], ridersOut: snap?.ridersOut || [],
       teams: [snap?.teamA, snap?.teamB].filter(Boolean),
       lastPostUtc: snap?.lastPostUtc, closeUtc, completed: closeUtc != null && nowUtc >= closeUtc,
@@ -466,7 +476,7 @@ function buildState() {
 
   const totals = computeTotals({
     faItems: fa.map((f) => ({ salary: f.a.leadingAmount || 0, amILeading: f.a.amILeading, completed: f.completed })),
-    deals: deals.filter((d) => d.involvesMe && !d.voided).map((d) => ({ ...d.figures, isLoan: d.isLoan, completed: d.completed })),
+    deals: deals.filter((d) => d.involvesMe && !d.voided && !d.superseded).map((d) => ({ ...d.figures, isLoan: d.isLoan, completed: d.completed })),
     sacks,
     baseSalary, budget: cfg.budget, reserve: cfg.reserve, cap,
   });
@@ -481,7 +491,7 @@ function buildState() {
     addJr(f.completed ? rb.confirmed : rb.pending, countsAsJunior(f.junior, f.a.leadingAmount));
   }
   for (const d of deals) {
-    if (!d.involvesMe || d.voided) continue;
+    if (!d.involvesMe || d.voided || d.superseded) continue;
     if (!d.isLoan) { // transfers change ownership
       for (const n of d.ridersIn) addJr(d.completed ? rb.confirmed : rb.pending, juniorByName(n));
       if (d.completed) for (const n of d.ridersOut) addJr(rb.departed, juniorByName(n));

@@ -25,6 +25,7 @@ html.light .badge.other,html.light .badge.gone,html.light .badge.type-swap{backg
 html.light .badge.open,html.light .badge.done,html.light .badge.type-loan-in,html.light .badge.type-loan{background:#e0ebfd;color:#1d4ed8}
 html.light .badge.won,html.light .badge.win-open,html.light .badge.type-buy,html.light .badge.type-transfer{background:#bcefcf;color:#14672f}
 html.light .badge.voided,html.light .badge.win-closed{background:#fee2e2;color:#b91c1c}
+html.light .badge.superseded{background:#e6e9ef;color:#5a6474}
 html.light .badge.closing{background:#fdf0d3}
 html.light .badge.type-sell{background:#ffedd5;color:#c2410c}
 html.light .badge.type-loan-out{background:#dde8f5;color:#1e5a8a}
@@ -197,6 +198,7 @@ tr.lead:hover td{background:#123a2c}
 .badge.gone{background:#2a2233;color:#d9b8e8}
 .badge.done{background:#13233b;color:#9cc4f5}
 .badge.voided{background:#3a1a1a;color:#f5a3a3}
+.badge.superseded{background:#2a2f3a;color:#aeb8c8}
 .badge.win-open{background:#20351f;color:#a7e08a}
 .badge.win-closed{background:#3a1a1a;color:#f5a3a3}
 tr.voided-row td{opacity:.5} /* uniform dim, no green tint */
