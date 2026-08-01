@@ -716,6 +716,41 @@ console.log('\n[parseSackPost]');
   eq('wage 70k', s5.sackWage, 70000);
 }
 
+console.log('\n[supersededDealIds]');
+{
+  // Pithie chain: an early swap is superseded by later deals moving the same rider
+  const deals = [
+    { threadId: 1, riders: ['Laurence Pithie', 'Logan Owen'], opUtc: 100, voided: false }, // early swap
+    { threadId: 2, riders: ['Laurence Pithie', 'Mathieu Van der Poel', 'David Gaudu'], opUtc: 200, voided: false },
+    { threadId: 3, riders: ['Logan Owen'], opUtc: 300, voided: false }, // Logan Owen sold later (valid)
+    { threadId: 4, riders: ['Laurence Pithie', 'David Gaudu'], opUtc: 400, voided: false }, // latest Pithie deal
+  ];
+  const sup = model.supersededDealIds(deals);
+  ok('early swap (1) superseded', sup.has(1));
+  ok('mid Pithie deal (2) superseded by (4)', sup.has(2));
+  ok('final Pithie deal (4) NOT superseded', !sup.has(4));
+  ok('latest Logan Owen deal (3) NOT superseded', !sup.has(3));
+  // a voided later deal must NOT supersede an earlier one
+  const withVoid = [
+    { threadId: 10, riders: ['Rider X'], opUtc: 100, voided: false },
+    { threadId: 11, riders: ['Rider X'], opUtc: 200, voided: true },
+  ];
+  ok('voided later deal does not supersede', !model.supersededDealIds(withVoid).has(10));
+  // simultaneous (equal opUtc) reposts don't cancel each other
+  const tie = [
+    { threadId: 20, riders: ['Rider Y'], opUtc: 500, voided: false },
+    { threadId: 21, riders: ['Rider Y'], opUtc: 500, voided: false },
+  ];
+  const tieSet = model.supersededDealIds(tie);
+  ok('equal-time deals: neither superseded', !tieSet.has(20) && !tieSet.has(21));
+  // unrelated riders are independent
+  const indep = [
+    { threadId: 30, riders: ['A'], opUtc: 100, voided: false },
+    { threadId: 31, riders: ['B'], opUtc: 200, voided: false },
+  ];
+  ok('unrelated riders: neither superseded', model.supersededDealIds(indep).size === 0);
+}
+
 console.log('\n[applyManualOrder]');
 {
   const items = [{ key: 'a' }, { key: 'b' }, { key: 'c' }, { key: 'd' }];
@@ -742,6 +777,8 @@ console.log('\n[faSection / dealSection]');
   eq('deal completed + third-party → others', model.dealSection({ completed: true, voided: false, involvesMe: false }), 'others');
   eq('deal pending → active', model.dealSection({ completed: false, involvesMe: true }), 'active');
   eq('deal voided (even if completed) → active', model.dealSection({ completed: true, voided: true, involvesMe: true }), 'active');
+  eq('superseded (mine) → completed to you', model.dealSection({ superseded: true, involvesMe: true }), 'you');
+  eq('superseded (others) → completed to others', model.dealSection({ superseded: true, involvesMe: false }), 'others');
 }
 
 console.log('\n[transaction CSV export]');
