@@ -457,6 +457,9 @@ function buildState() {
   const derived = teamDivision(cfg.myTeam);
   const divChosen = cfg.division && cfg.division !== 'auto' ? cfg.division : derived;
   const cap = divisionCap(divChosen || 'CT');
+  // The Jr marker only matters for CT teams (juniors are ½-riders there); for
+  // PT/PCT it's irrelevant. "CT" == the 1.2M cap (DB division or setup override).
+  const teamIsCt = cap === divisionCap('CT');
   const dbSquad = squadSalary(cfg.myTeam);
   // Existing salary: use the manual entry; if blank, fall back to the DB (real season).
   const baseSalary = cfg.baseSalary !== '' ? cfg.baseSalary : (dbSquad.count ? dbSquad.salary : '');
@@ -491,7 +494,11 @@ function buildState() {
 
   // drag-to-reorder: give each card a stable key, then apply the saved order
   // (unknown/new cards keep their natural order at the end).
-  for (const f of fa) f.key = f.riderId != null ? 'r' + f.riderId : 't' + f.threadId;
+  // juniorTag: show the Jr marker only for a junior signing (<50k) on a CT team.
+  for (const f of fa) {
+    f.key = f.riderId != null ? 'r' + f.riderId : 't' + f.threadId;
+    f.juniorTag = teamIsCt && countsAsJunior(f.junior, f.a.leadingAmount);
+  }
   for (const d of deals) d.key = 'd' + d.threadId;
   for (const k of sacks) k.key = 's' + k.threadId;
 

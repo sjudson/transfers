@@ -155,6 +155,13 @@ input:focus,select:focus{outline:none;border-color:var(--accent)}
 .fa-name a{color:var(--accent);text-decoration:none}
 .fa-name a:hover{text-decoration:underline}
 .fa-name .sub{color:var(--sub);font-weight:400;font-size:11px}
+/* category tags on FA cards — a distinct pill so "JUNIOR" reads as a label,
+   not a name suffix (Harry Connick Jr) */
+.tag{display:inline-block;font-size:9px;font-weight:800;letter-spacing:.07em;line-height:1.5;
+  border-radius:4px;padding:1px 6px;vertical-align:middle;text-transform:uppercase}
+.tag-jr{color:#1c1403;background:#f5c451;border:1px solid #d9a520}
+.tag-sack{color:#fff;background:#dc2626;border:1px solid #b91c1c}
+html.light .tag-jr{color:#3a2a00;background:#f6cf6a;border-color:#d9a520}
 .fa-status{display:flex;align-items:center;gap:8px}
 .fa-status .cd{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
 .fa-right{margin-left:auto;display:flex;align-items:center;gap:10px}

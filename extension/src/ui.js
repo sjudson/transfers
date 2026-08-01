@@ -272,12 +272,18 @@ function countEl(o, sign = '') {
   return span;
 }
 function putCount(id, o, sign = '') { const e = $(id); e.textContent = ''; e.append(countEl(o, sign)); }
+const fmtHalf = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1)); // 13.5, 13
 
 function renderRoster(s) {
   const r = s.roster;
   $('rDiv').textContent = `(${r.ct ? 'CT' : (s.division.code || '')} ${r.min}–${r.max})`;
   const squad = $('rSquad'); squad.textContent = '';
-  squad.append(countEl(r.committed));
+  // Show the count that's driving the constraint that's actually binding: over the
+  // max, juniors count in full, so show the full head-count (maxCount); otherwise
+  // show the min-weighted count where a CT junior is ½ (e.g. 13 seniors + 1 junior
+  // → 13.5¹ʲ, matching the yellow "under min" colouring). Buckets stay raw counts.
+  squad.append(document.createTextNode(fmtHalf(r.overMax ? r.committed.maxCount : r.committed.minCount)));
+  if (r.committed.jr) squad.append(el('sup', 'jrsup', r.committed.jr + 'j'));
   squad.append(document.createTextNode(` / ${r.min}–${r.max}`));
   squad.classList.toggle('over', r.overMax);
   squad.classList.toggle('under', r.underMin);
@@ -344,10 +350,12 @@ function faCard(f, s) {
     } else {
       name.append(el('span', null, f.rider.n));
     }
-    if (f.junior) { const j = el('span', 'jr', 'Jr'); j.title = 'Junior / stagiaire (min bid €20k)'; name.append(document.createTextNode(' ')); name.append(j); }
-    if (f.kind === 'sack') { const sk = el('span', 'jr sack', 'Sacked'); sk.title = 'Sacked rider — now a free agent'; name.append(document.createTextNode(' ')); name.append(sk); }
     if (!f.threadId) name.append(el('span', 'sub', f.locating ? ' · locating thread…' : ' · no thread found'));
     l1.append(name);
+    // tags are flex siblings so they get even spacing on both sides (not crammed
+    // against the name like a "Jr" name suffix)
+    if (f.juniorTag) { const j = el('span', 'tag tag-jr', 'JUNIOR'); j.title = 'Junior rider — counts as ½ toward the CT roster minimum (bid under €50k)'; l1.append(j); }
+    if (f.kind === 'sack') { const sk = el('span', 'tag tag-sack', 'SACKED'); sk.title = 'Sacked rider — now a free agent'; l1.append(sk); }
 
     l1.append(stat('Age', f.rider.a != null ? f.rider.a : '—'));
     l1.append(stat('OVL', f.rider.o != null ? Math.round(f.rider.o) : '—'));
