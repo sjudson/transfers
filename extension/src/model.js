@@ -275,7 +275,22 @@ export function parseDeal(opText) {
     else if ((m = /^Wage paid by Team\s*[AB]\s*:(.*)$/i.exec(line))) blk[cur].wagePaid = dealMoney(m[1]);
     else if (/^(Deal confirmed|Confirmed|Loan Clause)/i.test(line)) cur = null;
   }
-  return { teamA: blk.A, teamB: blk.B, isLoan };
+  // In a two-team deal riders only move between A and B, so B's rider lines must
+  // mirror A's (B.in = A.out, B.out = A.in). Threads are frequently mis-filled —
+  // both blocks typed from the SAME perspective, so both list the identical Rider
+  // Out/In — which silently flips the salary direction for one side. Reconcile:
+  // trust the non-empty block (A by convention) and derive the other as its mirror.
+  const eqSet = (x, y) => { const a = x.map(norm).sort(), b = y.map(norm).sort(); return a.length === b.length && a.every((v, i) => v === b[i]); };
+  const aHas = !!(blk.A.out.length || blk.A.in.length);
+  const bHas = !!(blk.B.out.length || blk.B.in.length);
+  const mirrored = eqSet(blk.A.out, blk.B.in) && eqSet(blk.A.in, blk.B.out);
+  if (!mirrored) {
+    if (aHas) { blk.B.out = blk.A.in.slice(); blk.B.in = blk.A.out.slice(); }
+    else if (bHas) { blk.A.out = blk.B.in.slice(); blk.A.in = blk.B.out.slice(); }
+  }
+  // malformed = both sides listed riders but they didn't mirror (a genuine
+  // contradiction we had to auto-correct) — worth flagging for a manual check.
+  return { teamA: blk.A, teamB: blk.B, isLoan, malformed: !mirrored && aHas && bHas };
 }
 
 // A deal thread can be a bidding war (the price escalates across posts as teams
@@ -338,7 +353,7 @@ export function dealFigures(opText, myTeam, wageOf) {
   // Neutral facts about the deal (used to display third-party deals you add by hand).
   const dealFee = Math.max(d.teamA.moneyOut || 0, d.teamA.moneyIn || 0, d.teamB.moneyOut || 0, d.teamB.moneyIn || 0);
   const neutralType = d.isLoan ? 'loan' : ((d.teamA.out.length && d.teamB.out.length) ? 'swap' : 'transfer');
-  const common = { isLoan: d.isLoan, teamA: d.teamA.name, teamB: d.teamB.name, dealFee, neutralType };
+  const common = { isLoan: d.isLoan, teamA: d.teamA.name, teamB: d.teamB.name, dealFee, neutralType, malformed: !!d.malformed };
   if (!side) return { involvesMe, mySide: null, transferFee: null, loanFee: null, salaryDelta: null, ridersIn: [], ridersOut: [], ...common };
 
   const net = (side.moneyOut || 0) - (side.moneyIn || 0); // + = cash I pay
@@ -428,10 +443,12 @@ export function sackFines(mine) {
 // Two-axis budget model, assuming you win every free agent you currently lead:
 //  * SALARY (wages, vs the division salary cap): existing squad + new free-agent
 //    wages + deal salary changes − wages freed by riders you sacked.
-//  * BUDGET (cash, vs your entered budget): transfer fees + loan fees + the
-//    progressive fines for riders you sacked.
+//  * BUDGET (cash out, vs your entered budget): projected salary + transfer/loan
+//    fees PAID OUT + sack fines + reserve. Fees you RECEIVE are income, not
+//    negative spend, so they never pull the spend below your salary.
 // faItems: [{ salary, amILeading, completed }]
-// deals:   [{ salaryAdd, transferFee, loanFee, isLoan, completed }]
+// deals:   [{ salaryAdd, transferFee, loanFee, isLoan, completed }]  (fees are net,
+//   +ve = you pay, −ve = you receive; only the paid-out part counts toward spend)
 export function computeTotals({ faItems = [], deals = [], sacks = [], baseSalary = 0, budget = 0, reserve = 0, cap = 0 }) {
   const S = {
     existing: num(baseSalary),
@@ -463,12 +480,16 @@ export function computeTotals({ faItems = [], deals = [], sacks = [], baseSalary
   const projected = S.existing + S.faCompleted + S.faPending
     + S.transferCompleted + S.transferPending + S.loanCompleted + S.loanPending - sackReduction;
   const bud = num(budget), res = num(reserve);
-  // The whole projected squad salary draws on the budget, alongside fees,
-  // fines and the reserve.
-  const spend = transfer + loan + fines + res + projected;
+  // Trades adjust your BUDGET (cash pool), not your spend: transfer/loan cash you
+  // RECEIVE raises the budget, cash you PAY lowers it. Spend is what you commit —
+  // projected salary + sack fines + reserve — and is checked against that adjusted
+  // budget. (transfer/loan are net, +ve = you pay, so received = negative.)
+  const netTradeFlow = -(transfer + loan);    // + = net cash received from trades
+  const spend = projected + fines + res;
+  const adjustedBudget = bud + netTradeFlow;
   return {
     salary: { ...S, sackReduction, projected, cap, over: cap > 0 && projected > cap },
-    budget: { salary: projected, ...F, transfer, loan, fines, reserve: res, spend, budget: bud, over: bud > 0 && spend > bud },
+    budget: { salary: projected, ...F, transfer, loan, fines, reserve: res, netTradeFlow, spend, budget: bud, adjustedBudget, over: bud > 0 && spend > adjustedBudget },
   };
 }
 

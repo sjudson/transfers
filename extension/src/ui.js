@@ -216,15 +216,31 @@ function renderTotals(s) {
   bar('sBar', salary.projected, salary.cap);
 
   putMoney('bSalary', budget.salary);
+  putMoney('bFines', budget.fines);
+  putMoney('bReserve', budget.reserve);
   putMoney('bTransferC', budget.transferC);
   putMoney('bTransferP', budget.transferP);
   putMoney('bLoanC', budget.loanC);
   putMoney('bLoanP', budget.loanP);
-  putMoney('bFines', budget.fines);
-  putMoney('bReserve', budget.reserve);
-  const spend = $('bSpend'); spend.textContent = ''; spend.append(blueEl(budget.spend));
-  $('bBudget').textContent = budget.budget ? fmtEuro(budget.budget) : 'not set';
-  bar('bBar', budget.spend, budget.budget);
+  // Net trade cash flow (received − paid). Received raises the budget (denominator,
+  // green +); paid raises the spend (numerator, red −). Only one side is ever
+  // non-zero, so the "on track" check is spend+paid vs budget+received.
+  renderBudgetLine($('bSpend'), $('bBudget'), budget.spend, budget.budget, budget.netTradeFlow);
+  const received = Math.max(0, budget.netTradeFlow), paid = Math.max(0, -budget.netTradeFlow);
+  bar('bBar', budget.spend + paid, budget.budget ? budget.budget + received : 0);
+}
+
+// Fill the spend (numerator) + budget (denominator) cells with the trade-flow
+// annotation on the correct side. flow > 0 = received (→ budget, green +);
+// flow < 0 = paid (→ spend, red −).
+function renderBudgetLine(spendEl, budgetEl, spend, budgetVal, flow) {
+  const received = Math.max(0, flow), paid = Math.max(0, -flow);
+  spendEl.textContent = ''; spendEl.append(blueEl(spend + paid));
+  if (paid) spendEl.append(el('span', 'flow-neg', ` (−${fmtEuro(paid)} transfer net)`));
+  budgetEl.textContent = '';
+  if (!budgetVal) { budgetEl.textContent = 'not set'; return; }
+  budgetEl.append(document.createTextNode(fmtEuro(budgetVal + received)));
+  if (received) budgetEl.append(el('span', 'flow-pos', ` (+${fmtEuro(received)} transfer net)`));
 }
 
 function renderSacks(s) {
@@ -308,6 +324,17 @@ export function renderTiming(s) {
   else close.textContent = fmtDuration(s.transferCloseUtc - s.nowUtc);
 }
 
+// A live countdown: a fixed prefix ("closes in ") plus an inner span carrying
+// data-win that the 1s ticker updates. Keeping the prefix separate stops the
+// ticker from overwriting it (which made "closes in" flash after each render).
+function countdownEl(prefix, winMs, nowUtc) {
+  const cd = el('span', 'cd');
+  if (prefix) cd.append(document.createTextNode(prefix));
+  const dur = el('span'); dur.dataset.win = winMs; dur.textContent = fmtDuration(winMs - nowUtc);
+  cd.append(dur);
+  return cd;
+}
+
 function stat(label, val) {
   const s = el('span', 'stat');
   s.append(el('label', null, label));
@@ -367,8 +394,7 @@ function faCard(f, s) {
     if (closed) {
       stWrap.append(badge(f.status.key, f.status.label));
     } else if (f.a.winUtcMs) {
-      const cd = el('span', 'cd'); cd.dataset.win = f.a.winUtcMs; cd.textContent = 'closes in ' + fmtDuration(f.a.winUtcMs - s.nowUtc);
-      stWrap.append(cd);
+      stWrap.append(countdownEl('closes in ', f.a.winUtcMs, s.nowUtc));
     } else if (f.status) {
       stWrap.append(badge(f.status.key, f.status.label));
     }
@@ -436,7 +462,14 @@ function dealRow(d, s) {
     tr.append(th);
 
     // coloured deal-type label (distinct from the thread name)
-    const typeTd = el('td'); typeTd.append(badge('type-' + d.type, DEAL_TYPE_LABEL[d.type] || 'Deal')); tr.append(typeTd);
+    const typeTd = el('td'); typeTd.append(badge('type-' + d.type, DEAL_TYPE_LABEL[d.type] || 'Deal'));
+    if (d.malformed) {
+      const w = badge('malformed', '⚠ check');
+      w.title = 'The forum thread listed inconsistent rider blocks (both sides showed the same riders). The tool auto-corrected by mirroring Team A — double-check this deal on the site.';
+      typeTd.append(document.createTextNode(' ')); typeTd.append(w);
+      tr.classList.add('malformed-row');
+    }
+    tr.append(typeTd);
 
     // read-only, from the thread/DB (green = money/cap back to you; n/a unknown)
     tr.append(moneyCell(d.display.transferFee));
@@ -448,7 +481,7 @@ function dealRow(d, s) {
     if (d.voided) stTd.append(badge('voided', 'Voided'));
     else if (d.superseded) { const b = badge('superseded', 'Superseded'); b.title = 'A later deal moved one of these riders again — this one no longer stands'; stTd.append(b); }
     else if (d.completed) stTd.append(badge('done', 'Completed'));
-    else if (d.closeUtc) { const cd = el('span', 'cd'); cd.dataset.win = d.closeUtc; cd.textContent = 'closes in ' + fmtDuration(d.closeUtc - s.nowUtc); stTd.append(cd); }
+    else if (d.closeUtc) { stTd.append(countdownEl('closes in ', d.closeUtc, s.nowUtc)); }
     else stTd.textContent = '—';
     if (d.voided || d.superseded) tr.classList.add('voided-row');
     tr.append(stTd);

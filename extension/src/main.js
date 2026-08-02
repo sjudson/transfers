@@ -258,7 +258,7 @@ async function fetchDealThread(threadId) {
   const wd = parseDeal(winnerText);
   dealSnap.set(threadId, {
     title: t.title || listing.get(threadId)?.title, voided,
-    involvesMe: fig.involvesMe, isLoan: fig.isLoan, mySide: fig.mySide,
+    involvesMe: fig.involvesMe, isLoan: fig.isLoan, mySide: fig.mySide, malformed: fig.malformed,
     transferFee: fig.transferFee, loanFee: fig.loanFee, salaryDelta: fig.salaryDelta,
     ridersIn: fig.ridersIn || [], ridersOut: fig.ridersOut || [],
     teamA: fig.teamA, teamB: fig.teamB, dealFee: fig.dealFee, neutralType: fig.neutralType,
@@ -386,7 +386,7 @@ function buildState() {
     const analysis = { leadingAmount: null, minNextBid: MIN_WAGE, myHighest: null, amILeading: false, myBids: [], winUtcMs: null, threadId: `r${riderId}` };
     faAnalyses.push(analysis);
     fa.push({
-      riderId, threadId: t, rider, kind: 'fa', junior: false,
+      riderId, threadId: t, rider, kind: 'fa', junior: !!rider.j, // DB junior-eligibility (tag gated on <50k + CT below)
       band: fmtBand(Math.max(MIN_WAGE, rider.w || 0)), completed: false,
       a: analysis, status: t ? faStatus(analysis, nowUtc) : null,
       updatedUtc: null, locating: !t && !initDone,
@@ -431,7 +431,7 @@ function buildState() {
       : { transferFee: isLoan ? null : (snap?.dealFee ?? null), loanFee: isLoan ? (snap?.dealFee ?? null) : null, salaryAdd: null };
     deals.push({
       threadId, title: snap?.title || listing.get(threadId)?.title,
-      involvesMe, isLoan, type, voided: !!snap?.voided, superseded: supersededIds.has(threadId), mySide: snap?.mySide || null,
+      involvesMe, isLoan, type, voided: !!snap?.voided, superseded: supersededIds.has(threadId), malformed: !!snap?.malformed, mySide: snap?.mySide || null,
       ridersIn: snap?.ridersIn || [], ridersOut: snap?.ridersOut || [],
       teams: [snap?.teamA, snap?.teamB].filter(Boolean),
       lastPostUtc: snap?.lastPostUtc, closeUtc, completed: closeUtc != null && nowUtc >= closeUtc,
@@ -473,6 +473,23 @@ function buildState() {
   const dbSquad = squadSalary(cfg.myTeam);
   // Existing salary: use the manual entry; if blank, fall back to the DB (real season).
   const baseSalary = cfg.baseSalary !== '' ? cfg.baseSalary : (dbSquad.count ? dbSquad.salary : '');
+
+  // FA-aware wages: a rider signed as a free agent this window is in the DB as a
+  // free agent (wage 0), so trading them in would add €0 salary. Fall back to the
+  // winning bid for FAs you track, and re-derive each of YOUR transfers' salary.
+  const faWon = new Map();
+  for (const f of fa) { if (f.a.amILeading && f.a.leadingAmount) faWon.set(norm(f.rider.n), f.a.leadingAmount); }
+  const wageOfFa = (name) => { const r = riderByName(name); const w = r ? (r.w || 0) : null; if (w) return w; const fw = faWon.get(norm(name)); return fw != null ? fw : w; };
+  for (const d of deals) {
+    if (!d.involvesMe || d.isLoan || d.voided || d.superseded) continue;
+    const ins = d.ridersIn || [], outs = d.ridersOut || [];
+    if (!ins.length && !outs.length) continue;
+    let sum = 0, known = true;
+    for (const n of ins) { const w = wageOfFa(n); if (w == null) known = false; else sum += w; }
+    for (const n of outs) { const w = wageOfFa(n); if (w == null) known = false; else sum -= w; }
+    d.figures.salaryAdd = known ? sum : null;
+    d.display.salaryAdd = d.figures.salaryAdd;
+  }
 
   const totals = computeTotals({
     faItems: fa.map((f) => ({ salary: f.a.leadingAmount || 0, amILeading: f.a.amILeading, completed: f.completed })),
@@ -644,11 +661,20 @@ async function runMigrations() {
   // Deal 24h anchor moved from the OP to the winning (over-the-top) post. Existing
   // deal snapshots were anchored to the OP; re-enqueue every known deal so it is
   // re-parsed with the new anchor (a cache hit is fine — only the parse changed).
-  if (!done.dealAnchorV2) {
+  // Re-enqueue every known deal so it is re-parsed. Used for parse-only fixes where
+  // the cached body is fine but the interpretation changed (a cache hit re-parses).
+  const reparseDeals = async (flag) => {
+    if (done[flag]) return;
     for (const tid of new Set([...dealSnap.keys(), ...cfg.deals])) pending.push(cfg.dealForum + ':' + tid);
-    done.dealAnchorV2 = true;
+    done[flag] = true;
     await kv.set('migrations', done);
-  }
+  };
+  // Deal 24h anchor moved from the OP to the winning (over-the-top) post.
+  await reparseDeals('dealAnchorV2');
+  // Deal rider-block reconciliation (+ malformed flagging): mis-filled B blocks
+  // (both sides same perspective) had the salary direction flipped; re-parse to
+  // correct them and surface the ⚠ "check" tag.
+  await reparseDeals('dealMirrorV2');
 }
 
 async function boot() {

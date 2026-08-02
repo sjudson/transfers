@@ -207,13 +207,24 @@ console.log('\n[computeTotals: salary breakdown + budget + sacks]');
   // 1,000,000 + 120k + 50k + 80k − 20k − sacks(110k) = 1,120,000
   eq('projected salary', t.salary.projected, 1120000);
   eq('sack reduction (mine only)', t.salary.sackReduction, 110000);
-  // budget: transfer 250k (completed) + loan 30k (pending) + fines 160k + reserve 100k + projected salary 1,120k
+  // budget model: spend = projected salary + fines + reserve (NOT trade fees).
+  // Trades adjust the budget: 250k transfer + 30k loan PAID → budget − 280k.
   eq('sacking fines progressive', t.budget.fines, 160000);
   eq('full projected salary against budget', t.budget.salary, 1120000);
   eq('transfer fee completed', t.budget.transferC, 250000);
   eq('transfer fee pending', t.budget.transferP, 0);
   eq('loan fee pending', t.budget.loanP, 30000);
-  eq('projected budget spend', t.budget.spend, 1660000);
+  eq('spend = salary + fines + reserve (no fees)', t.budget.spend, 1380000); // 1,120k + 160k + 100k
+  eq('net trade flow = −280k (paid out)', t.budget.netTradeFlow, -280000);
+  eq('adjusted budget = 600k − 280k', t.budget.adjustedBudget, 320000);
+  ok('over budget (1.38m > 320k)', t.budget.over === true);
+  // a net SELLER raises the budget: receive 300k on a transfer → budget + 300k
+  const seller = model.computeTotals({ baseSalary: '1000000', budget: '1000000',
+    deals: [{ transferFee: -300000, loanFee: 0, salaryAdd: 0, isLoan: false, completed: true }] });
+  eq('net received raises budget (+300k)', seller.budget.netTradeFlow, 300000);
+  eq('seller adjusted budget = 1.3m', seller.budget.adjustedBudget, 1300000);
+  eq('seller spend = salary only', seller.budget.spend, 1000000);
+  ok('seller not over budget', seller.budget.over === false);
   const over = model.computeTotals({ faItems: [{ salary: 100000, amILeading: true, completed: false }], baseSalary: '1200000', cap: 1200000 });
   eq('salary over cap flagged', over.salary.over, true);
 }
@@ -496,6 +507,34 @@ console.log('\n[dealFigures]');
   eq('classified as a transfer, not a swap', mf.neutralType, 'transfer');
   eq('buyer pays 900k fee', mf.transferFee, 900000);
   eq('salary resolves to Moscon wage (not n/a)', mf.salaryDelta, 900000);
+
+  // Mis-filled thread: BOTH team blocks typed from the same perspective (both list
+  // Rider Out: Scott Davies / Rider In: Michael Christodoulos). B must mirror A, so
+  // RoR really gets Scott + gives Michael — salary delta flips to −25k, not +25k.
+  const swap = 'Team A: ELCO - ABEA\nRider Out: Scott Davies\nRider In: Michael Christodoulos\nMoney Out: 0\nMoney In: 100,000\nTeam B: Riders of Rohan\nRider Out: Scott Davies\nRider In: Michael Christodoulos\nMoney Out: 100,000\nMoney In: 0\nDeal confirmed by ELCO - ABEA';
+  const pd = model.parseDeal(swap);
+  eq('team B rider-in corrected to Scott Davies', pd.teamB.in.join(), 'Scott Davies');
+  eq('team B rider-out corrected to Michael Christodoulos', pd.teamB.out.join(), 'Michael Christodoulos');
+  const wage = (n) => (n === 'Scott Davies' ? 75000 : n === 'Michael Christodoulos' ? 100000 : null);
+  eq('RoR salary delta = −25k (was +25k)', model.dealFigures(swap, 'Riders of Rohan', wage).salaryDelta, -25000);
+  eq('ELCO salary delta = +25k', model.dealFigures(swap, 'ELCO - ABEA', wage).salaryDelta, 25000);
+  // a well-formed (already mirrored) deal is left unchanged
+  const wf = model.parseDeal('Team A: X\nRider Out: A1\nRider In: B1\nTeam B: Y\nRider Out: B1\nRider In: A1');
+  eq('well-formed B.in unchanged', wf.teamB.in.join(), 'A1');
+  eq('well-formed B.out unchanged', wf.teamB.out.join(), 'B1');
+  // malformed flag: set only when both sides listed riders that didn't mirror
+  ok('malformed flag set on the mis-filled swap', pd.malformed === true);
+  ok('well-formed deal not flagged', wf.malformed === false);
+  ok('flag propagates through dealFigures', model.dealFigures(swap, 'Riders of Rohan', wage).malformed === true);
+  // one-sided (B blank) is reconciled silently, not flagged as bad
+  const oneSided = model.parseDeal('Team A: X\nRider Out: A1\nRider In: ---\nTeam B: Y\nRider Out: ---\nRider In: ---');
+  ok('one-sided deal not flagged malformed', oneSided.malformed === false);
+
+  // FA-signed rider traded: dealFigures honours an FA-aware wageOf (DB wage 0 →
+  // fall back to the FA bid), so the buyer's salary reflects the real wage.
+  const buy = 'Team A: X\nRider Out: Newbie\nMoney Out: 0\nMoney In: 100,000\nTeam B: Y\nRider In: Newbie\nMoney Out: 100,000\nMoney In: 0';
+  const wageOfFa = (n) => (n === 'Newbie' ? 300000 : null); // FA-aware wage
+  eq('buyer salary uses FA-aware wage (+300k)', model.dealFigures(buy, 'Y', wageOfFa).salaryDelta, 300000);
 }
 
 // ============ REAL archived threads (2024 testbed forums 384/385) ==========
@@ -691,6 +730,70 @@ console.log('\n[admin aggregation]');
   const existingPart = jcard.querySelector('.abreak .apart'); // first part = existing
   ok('existing shows all 4 riders', /4/.test(existingPart.textContent));
   ok('existing counts exactly 1 junior (the <50k eligible one)', existingPart.querySelector('.jrsup')?.textContent === '1j');
+
+  // superseded deal's fee must NOT count toward the admin budget spend (repro of
+  // the "outgoing 760 vs 15" report: a 750k superseded swap was still counted)
+  const t1 = Date.UTC(2026, 6, 26, 12, 0, 0), t2 = Date.UTC(2026, 6, 27, 12, 0, 0);
+  const dealFacts = [
+    { id: 1, a: { name: 'Bolt', out: ['Laurence Pithie'], in: ['Logan Owen'], moneyOut: 0, moneyIn: 750000 },
+      b: { name: 'Philips', out: ['Logan Owen'], in: ['Laurence Pithie'], moneyOut: 750000, moneyIn: 0 }, isLoan: false, voided: false, opUtc: t1 },
+    { id: 2, a: { name: 'Bolt', out: ['Laurence Pithie'], in: ['David Gaudu'], moneyOut: 0, moneyIn: 1500000 },
+      b: { name: 'Grieg', out: ['David Gaudu'], in: ['Laurence Pithie'], moneyOut: 1500000, moneyIn: 0 }, isLoan: false, voided: false, opUtc: t2 },
+  ];
+  window.renderAdmin({ riders: [], teams: [{ name: 'Philips', div: 'PCT' }], faFacts: [], dealFacts, nowUtc: now, budgets: { philips: 100000 } });
+  const pcard = [...document.querySelectorAll('.acard')].find((c) => c.querySelector('.aname')?.textContent === 'Philips');
+  ok('superseded 750k swap excluded from admin spend (not over 100k budget)', !/Over budget/.test(pcard.textContent));
+
+  // net-seller budget display (Aker report): cash RECEIVED raises the budget
+  // denominator (green +), it never pulls the spend below salary.
+  const akr = [{ n: 'A1', t: 'Aker', d: 'PT', w: 3000000, j: 0, loan: 0 }]; // 3.0m salary
+  const akd = [{ id: 5, a: { name: 'Aker', out: ['SoldGuy'], in: [], moneyOut: 0, moneyIn: 200000 },
+    b: { name: 'Buyer', out: [], in: ['SoldGuy'], moneyOut: 200000, moneyIn: 0 }, isLoan: false, voided: false, opUtc: now - 3 * 24 * 3600 * 1000 }];
+  window.renderAdmin({ riders: akr, teams: [{ name: 'Aker', div: 'PT' }], faFacts: [], dealFacts: akd, nowUtc: now, budgets: { aker: 3500000 } });
+  const acard = [...document.querySelectorAll('.acard')].find((c) => c.querySelector('.aname')?.textContent === 'Aker');
+  ok('net-seller spend stays = salary (€3,000,000)', /€3,000,000 \//.test(acard.textContent));
+  ok('received cash raises budget denominator (+€200,000, → €3,700,000)', /€3,700,000/.test(acard.textContent) && /\+€200,000/.test(acard.textContent));
+  ok('net-seller on track, not over', /On track/.test(acard.textContent) && !/Over budget|Exceeded/.test(acard.textContent));
+
+  // salary audit must reconcile to the card's committed salary, and a superseded
+  // deal must be shown-but-excluded (the tool for debugging the "170k off" report)
+  const done3 = now - 3 * 24 * 3600 * 1000, done2 = now - 2 * 24 * 3600 * 1000;
+  const audRiders = [
+    { n: 'Base1', t: 'Audit', d: 'PT', w: 1000000, j: 0, loan: 0 },
+    { n: 'KeepGuy', t: 'Seller', d: 'PT', w: 200000, j: 0, loan: 0 },
+    { n: 'DupGuy', t: 'Seller2', d: 'PT', w: 500000, j: 0, loan: 0 },
+  ];
+  const audFa = [
+    { id: 50, kind: 'fa', riderName: 'FreeAgent1', leaderTeam: 'Audit', leaderAmount: 100000, winUtcMs: done3 },
+    { id: 51, kind: 'sack', sackTeam: 'Audit', sackWage: 50000, riderName: 'SackedOne', sackUtcMs: done3 },
+  ];
+  const audDeals = [
+    { id: 60, a: { name: 'Seller', out: ['KeepGuy'], in: [], moneyOut: 0, moneyIn: 200000 }, b: { name: 'Audit', out: [], in: ['KeepGuy'], moneyOut: 200000, moneyIn: 0 }, isLoan: false, voided: false, opUtc: done3 },
+    { id: 61, a: { name: 'Seller2', out: ['DupGuy'], in: [], moneyOut: 0, moneyIn: 500000 }, b: { name: 'Audit', out: [], in: ['DupGuy'], moneyOut: 500000, moneyIn: 0 }, isLoan: false, voided: false, opUtc: done3 },
+    { id: 62, a: { name: 'Seller2', out: ['DupGuy'], in: [], moneyOut: 0, moneyIn: 500000 }, b: { name: 'Other', out: [], in: ['DupGuy'], moneyOut: 500000, moneyIn: 0 }, isLoan: false, voided: false, opUtc: done2 },
+  ];
+  const audData = { riders: audRiders, teams: [{ name: 'Audit', div: 'PT' }], faFacts: audFa, dealFacts: audDeals, nowUtc: now, budgets: {} };
+  window.renderAdmin(audData);
+  const audCard = [...document.querySelectorAll('.acard')].find((c) => c.querySelector('.aname')?.textContent === 'Audit');
+  // expected committed = 1,000,000 base + 100,000 FA − 50,000 sack + 200,000 KeepGuy = 1,250,000 (DupGuy 500k superseded)
+  ok('card committed salary = €1,250,000', /€1,250,000 \//.test(audCard.textContent));
+  const audit = window.buildSalaryAudit(audData);
+  const auditLine = audit.split('\r\n').find((l) => l.startsWith('Audit,=== COMMITTED SALARY ==='));
+  eq('audit reconciles to committed salary', auditLine.split(',').pop(), '1250000');
+  ok('superseded deal 61 shown-but-excluded in audit', /transfer IN \[SUPERSEDED\],61,DupGuy/.test(audit));
+  ok('counted deal 60 present with running total', /transfer IN \[completed\],60,KeepGuy,200000,1250000/.test(audit));
+
+  // FA-signed-then-traded: the rider is in the DB as a free agent (wage 0); their
+  // wage must fall back to the FA-winning amount when traded (the €0-salary
+  // undercount that likely explains "salary 170k low with +10 confirmed").
+  const ftR = [{ n: 'Newbie', t: '', fa: 1, w: 0, j: 0, loan: 0 }];
+  const ftFa = [{ id: 70, kind: 'fa', riderName: 'Newbie', leaderTeam: 'X', leaderAmount: 300000, winUtcMs: done3 }];
+  const ftD = [{ id: 71, a: { name: 'X', out: ['Newbie'], in: [], moneyOut: 0, moneyIn: 100000 }, b: { name: 'Y', out: [], in: ['Newbie'], moneyOut: 100000, moneyIn: 0 }, isLoan: false, voided: false, opUtc: done2 }];
+  window.renderAdmin({ riders: ftR, teams: [{ name: 'X', div: 'PT' }, { name: 'Y', div: 'PT' }], faFacts: ftFa, dealFacts: ftD, nowUtc: now, budgets: {} });
+  const yCard = [...document.querySelectorAll('.acard')].find((c) => c.querySelector('.aname')?.textContent === 'Y');
+  const xCard = [...document.querySelectorAll('.acard')].find((c) => c.querySelector('.aname')?.textContent === 'X');
+  ok('traded FA rider carries their FA wage to the new team (Y = €300,000)', /€300,000 \//.test(yCard.textContent));
+  ok('selling team nets to €0 (FA won − traded out)', /€0 \//.test(xCard.textContent));
 }
 
 console.log('\n[parseSackPost]');
