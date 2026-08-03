@@ -176,6 +176,25 @@ export function dedupeFaByRider(items) {
   return out;
 }
 
+// Same idea as dedupeFaByRider, but for the ADMIN aggregator's team-agnostic facts.
+// Free agents get reposted (a "Duplicate thread"/"Double post" is common), so the same
+// rider can have two threads; the abandoned one often holds a single lone bid that
+// looks like an uncontested win. Keep only the authoritative auction per rider —
+// highest leading bid, then most recent win time. Sacks (and rider-less facts) pass
+// through untouched. facts: [{ id, kind, riderName, leaderAmount, winUtcMs, ... }].
+export function dedupeAdminFaFacts(facts) {
+  const best = new Map(); // norm(riderName) -> fact
+  const passthrough = [];
+  const rank = (x) => (x.leaderAmount || 0), rec = (x) => (x.winUtcMs || 0);
+  for (const f of facts || []) {
+    if (f.kind === 'sack' || !f.riderName) { passthrough.push(f); continue; }
+    const key = norm(f.riderName);
+    const prev = best.get(key);
+    if (!prev || (rank(f) !== rank(prev) ? rank(f) > rank(prev) : rec(f) > rec(prev))) best.set(key, f);
+  }
+  return [...passthrough, ...best.values()];
+}
+
 // A [Sack] thread's opening post is either a bare team name (like a bid post) or
 // a sentence "<rider> (Wage: N) is sacked by <TEAM>". Pull out the sacking team
 // and, when the post states it, the wage freed (else null → caller falls back to
@@ -299,41 +318,52 @@ export function parseDeal(opText) {
 // return that post so callers get both its terms and its timestamp (the 24h
 // window is anchored to when the winning offer was confirmed, not the OP).
 export function winningDealPost(posts) {
-  let best = null, bestFee = -1;
+  // A deal thread is an auction: a higher re-post ("overbid") only overrides the
+  // standing offer if it lands WITHIN 24h of it — before that offer completes. Once
+  // 24h pass with no higher offer, that offer wins and later posts don't count.
+  // (Stamps are compared as differences, so the tz offset cancels — use 0 here.)
+  const items = [];
   for (const p of posts || []) {
     const d = parseDeal(p.text || '');
     if (!d.teamA.name || !d.teamB.name) continue;
     const fee = Math.max(d.teamA.moneyOut || 0, d.teamA.moneyIn || 0, d.teamB.moneyOut || 0, d.teamB.moneyIn || 0);
-    if (fee >= bestFee) { bestFee = fee; best = p; } // >= : a later re-post wins ties
+    const ps = parseForumStamp(p.stampStr);
+    items.push({ p, fee, utc: ps ? stampToUtcMs(ps, 0) : null });
   }
-  return best;
+  if (!items.length) return null;
+  // Process chronologically (by stamp when present, else stable array order).
+  items.forEach((it, i) => { it.i = i; });
+  items.sort((a, b) => (a.utc == null || b.utc == null ? a.i - b.i : a.utc - b.utc));
+  let win = items[0];
+  for (let k = 1; k < items.length; k++) {
+    const it = items[k];
+    const withinWindow = win.utc == null || it.utc == null || it.utc < win.utc + DEAL_MS;
+    if (it.fee >= win.fee && withinWindow) win = it; // >= : a later re-post wins ties
+  }
+  return win.p;
 }
 export function winningDealText(posts) {
   const p = winningDealPost(posts);
   return (p && p.text) || (posts?.[0]?.text || '');
 }
 
-// Cross-deal supersession. A deal is superseded when a LATER (by opUtc) non-voided
-// deal involves any of the same riders — the rider was traded again, so the earlier
-// (often "Completed") deal no longer reflects reality (renegotiation reposts).
+// Cross-deal supersession. A deal is superseded when a LATER non-voided deal for the
+// same rider opens BEFORE this one completes — i.e. within its 24h window (opUtc +
+// DEAL_MS). A rider can be traded more than once, so a later deal that opens AFTER an
+// earlier one has already completed is a legitimate re-trade, NOT a supersession.
 // deals: [{ threadId, riders:[name], opUtc, voided }]. Returns a Set of superseded
 // threadIds. (Strictly later only, so simultaneous reposts don't cancel each other.)
 export function supersededDealIds(deals) {
-  const latest = new Map(); // norm(rider) -> newest opUtc among non-voided deals
-  for (const d of deals || []) {
-    if (d.voided || d.opUtc == null) continue;
-    for (const r of d.riders || []) {
-      const k = norm(r); if (!k) continue;
-      const cur = latest.get(k);
-      if (cur == null || d.opUtc > cur) latest.set(k, d.opUtc);
-    }
-  }
+  const list = (deals || []).filter((d) => !d.voided && d.opUtc != null);
   const out = new Set();
-  for (const d of deals || []) {
-    if (d.voided || d.opUtc == null) continue;
-    for (const r of d.riders || []) {
-      const k = norm(r); if (!k) continue;
-      if (latest.get(k) > d.opUtc) { out.add(d.threadId); break; }
+  for (const a of list) {
+    const ar = (a.riders || []).map(norm).filter(Boolean);
+    if (!ar.length) continue;
+    for (const b of list) {
+      if (b === a || b.opUtc <= a.opUtc) continue;      // b must be strictly later
+      if (b.opUtc >= a.opUtc + DEAL_MS) continue;       // a already completed → b is a re-trade
+      const bset = new Set((b.riders || []).map(norm).filter(Boolean));
+      if (ar.some((r) => bset.has(r))) { out.add(a.threadId); break; }
     }
   }
   return out;
@@ -372,10 +402,20 @@ export function dealFigures(opText, myTeam, wageOf) {
     involvesMe, mySide: side.name,
     transferFee: d.isLoan ? 0 : net,
     loanFee: d.isLoan ? net : 0,
+    earned: side.moneyIn || 0, // gross cash received on my side (taxable income)
     salaryDelta,
     ridersIn: side.in, ridersOut: side.out,
     ...common,
   };
+}
+
+// Transfer-income tax (2026 rules, thread 72684): on total cash RECEIVED from
+// trades/loans — 0% under €500k, 10% on €500k–€1M, 20% above €1M (progressive).
+export function transferTax(income) {
+  const n = num(income);
+  if (n <= 500000) return 0;
+  if (n <= 1000000) return (n - 500000) * 0.1;
+  return 50000 + (n - 1000000) * 0.2;
 }
 
 // Extract candidate € amounts from a deal's opening post (suggestions only).
@@ -485,11 +525,16 @@ export function computeTotals({ faItems = [], deals = [], sacks = [], baseSalary
   // projected salary + sack fines + reserve — and is checked against that adjusted
   // budget. (transfer/loan are net, +ve = you pay, so received = negative.)
   const netTradeFlow = -(transfer + loan);    // + = net cash received from trades
-  const spend = projected + fines + res;
+  // Transfer tax is a cost on gross income received (sum of cash-in across deals),
+  // computed at season end. It's shown separately from the base spend but counts
+  // toward the over-budget check. (income here is projected: all non-excluded deals.)
+  const income = deals.reduce((x, d) => x + num(d.earned), 0);
+  const tax = transferTax(income);
+  const spend = projected + fines + res;      // base commitment (tax rolled in below)
   const adjustedBudget = bud + netTradeFlow;
   return {
     salary: { ...S, sackReduction, projected, cap, over: cap > 0 && projected > cap },
-    budget: { salary: projected, ...F, transfer, loan, fines, reserve: res, netTradeFlow, spend, budget: bud, adjustedBudget, over: bud > 0 && spend > adjustedBudget },
+    budget: { salary: projected, ...F, transfer, loan, fines, reserve: res, netTradeFlow, spend, tax, income, budget: bud, adjustedBudget, over: bud > 0 && (spend + tax) > adjustedBudget },
   };
 }
 

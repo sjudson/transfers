@@ -98,9 +98,9 @@ main{max-width:1200px;margin:0 auto;padding:14px 16px 40px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column}
 .figrow{display:flex;justify-content:space-between;align-items:baseline;padding:3px 0}
 .figrow b{font-variant-numeric:tabular-nums}
-.figrow.total{border-top:1px solid var(--line);margin-top:auto;padding-top:7px;font-size:14px}
+.figrow.total{border-top:1px solid var(--line);margin-top:auto;padding-top:7px}
 .figrow.total b{color:var(--accent)}
-.figrow.sub{color:var(--muted);font-size:12px}
+.figrow.sub{color:var(--muted)}
 .figrow span{color:var(--muted)}
 .figrow b{color:var(--ink)}
 .note{color:var(--sub);font-size:11px;margin:6px 0 0}
@@ -209,8 +209,11 @@ tr.voided-row td{opacity:.5} /* uniform dim, no green tint */
 td.right{text-align:right}
 .money-blue{color:var(--accent);font-weight:600}
 .money-green{color:var(--good)}
-.flow-pos{color:var(--good);font-size:11px;font-weight:600}
-.flow-neg{color:var(--bad);font-size:11px;font-weight:600}
+/* budget ledger: money-blue + the "(incl. …)" note colors beat `.figrow span` (0,1,1) with 0,2,0 */
+.figrow b .money-blue{color:var(--accent);font-weight:600}
+.figrow .paid{color:var(--bad)}
+.figrow .recv{color:var(--good)}
+.ledger-top{border-top:1px solid var(--line);margin-top:8px;padding-top:7px}
 .you-team{color:var(--leadink);font-weight:600}
 /* deal-type labels (distinct palette from status badges) */
 .badge.type-buy{background:#14361f;color:#8fe0a5}

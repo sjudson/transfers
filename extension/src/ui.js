@@ -222,25 +222,46 @@ function renderTotals(s) {
   putMoney('bTransferP', budget.transferP);
   putMoney('bLoanC', budget.loanC);
   putMoney('bLoanP', budget.loanP);
-  // Net trade cash flow (received − paid). Received raises the budget (denominator,
-  // green +); paid raises the spend (numerator, red −). Only one side is ever
-  // non-zero, so the "on track" check is spend+paid vs budget+received.
-  renderBudgetLine($('bSpend'), $('bBudget'), budget.spend, budget.budget, budget.netTradeFlow);
+  // Ledger summary: net transfer/loan cash flow is a signed line that rolls INTO
+  // the spend total (cash paid, red) or the budget total (cash received, green).
+  // Only one of paid/received is ever non-zero.
   const received = Math.max(0, budget.netTradeFlow), paid = Math.max(0, -budget.netTradeFlow);
-  bar('bBar', budget.spend + paid, budget.budget ? budget.budget + received : 0);
-}
-
-// Fill the spend (numerator) + budget (denominator) cells with the trade-flow
-// annotation on the correct side. flow > 0 = received (→ budget, green +);
-// flow < 0 = paid (→ spend, red −).
-function renderBudgetLine(spendEl, budgetEl, spend, budgetVal, flow) {
-  const received = Math.max(0, flow), paid = Math.max(0, -flow);
-  spendEl.textContent = ''; spendEl.append(blueEl(spend + paid));
-  if (paid) spendEl.append(el('span', 'flow-neg', ` (−${fmtEuro(paid)} transfer net)`));
-  budgetEl.textContent = '';
-  if (!budgetVal) { budgetEl.textContent = 'not set'; return; }
-  budgetEl.append(document.createTextNode(fmtEuro(budgetVal + received)));
-  if (received) budgetEl.append(el('span', 'flow-pos', ` (+${fmtEuro(received)} transfer net)`));
+  const tax = budget.tax || 0;
+  const spendN = budget.spend + paid + tax, budgetD = budget.budget ? budget.budget + received : 0;
+  // Ledger: cash paid on trades and the transfer tax (both red) roll INTO the spend
+  // total; cash received (green) rolls into the budget total. The rolled-up Projected
+  // spend is labelled "(incl. paid, tax)" as applicable — only it is blue (headline);
+  // all rows share one font size.
+  const ledger = $('bLedger'); ledger.textContent = '';
+  const mkRow = (buildLabel, valueNode, cls) => {
+    const r = el('div', 'figrow' + (cls ? ' ' + cls : ''));
+    const s = el('span'); buildLabel(s); r.append(s);
+    const b = el('b'); b.append(valueNode); r.append(b);
+    ledger.append(r);
+  };
+  const lbl = (main, note, noteCls) => (s) => {
+    s.append(document.createTextNode(main));
+    if (note) { s.append(document.createTextNode(' ')); s.append(el('span', noteCls, note)); }
+  };
+  const ink = (v) => document.createTextNode(fmtEuro(v));
+  const signed = (cls, v) => el('span', cls, `+${fmtEuro(v)}`);
+  const budgetVal = () => (budget.budget ? ink(budget.budget) : document.createTextNode('not set'));
+  // spend side: base + (paid?) + tax → Projected spend. The transfer tax line always
+  // shows (even €0) so it's clear the tax is accounted for.
+  const incl = [paid ? 'paid' : null, tax ? 'tax' : null].filter(Boolean);
+  mkRow(lbl('Base spend'), ink(budget.spend), 'ledger-top');
+  if (paid) mkRow(lbl('Transfers/loans paid (net)'), signed('paid', paid));
+  mkRow(lbl('Transfer tax'), tax ? signed('paid', tax) : ink(0));
+  mkRow(lbl('Projected spend', incl.length ? `(incl. ${incl.join(', ')})` : null, 'paid'), blueEl(spendN));
+  // budget side: entered + (received?) → available budget
+  if (received && budget.budget) {
+    mkRow(lbl('Budget (entered)'), ink(budget.budget));
+    mkRow(lbl('Transfers/loans received (net)'), signed('recv', received));
+    mkRow(lbl('Budget', '(incl. received)', 'recv'), ink(budgetD));
+  } else {
+    mkRow(lbl('Budget'), budgetVal());
+  }
+  bar('bBar', spendN, budgetD);
 }
 
 function renderSacks(s) {

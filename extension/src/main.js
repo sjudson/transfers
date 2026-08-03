@@ -12,7 +12,7 @@ import {
 } from './ridersdb.js';
 import { setupAdmin, refreshAdmin } from './admin-gate.js';
 import {
-  analyzeFreeAgentThread, faStatus, dailyUsage, computeTotals, dealFigures, winningDealPost, supersededDealIds, dedupeFaByRider, parseSackPost,
+  analyzeFreeAgentThread, faStatus, dailyUsage, computeTotals, dealFigures, winningDealPost, supersededDealIds, dedupeFaByRider, dedupeAdminFaFacts, parseSackPost,
   openingMinFor, faThreadKind, fmtBand, dealType, rosterCounts, parseDeal, countsAsJunior, applyManualOrder,
   JUNIOR_MIN, MIN_WAGE, DEAL_MS, FIRST_WINDOW_UTC, TRANSFER_CLOSE_UTC,
 } from './model.js';
@@ -35,6 +35,8 @@ const cfgDefaults = {
   shortlist: [], faThreads: [], deals: [],
   faForum: FA_FORUM, dealForum: DEAL_FORUM,
   adminBudgets: {}, // admin-only: norm(team) -> budget (€) for the admin panel
+  adminRenewals: {}, // admin-only: norm(team) -> renewal fines (€)  (tax is computed)
+  adminDismissedBids: {}, // admin-only: "normTeam|YYYY-MM-DD" -> true (acknowledged bid-limit crossings)
   faOrder: [], dealOrder: [], sackOrder: [], // drag-to-reorder card sequences (by card key)
 };
 let cfg = { ...cfgDefaults };
@@ -259,7 +261,7 @@ async function fetchDealThread(threadId) {
   dealSnap.set(threadId, {
     title: t.title || listing.get(threadId)?.title, voided,
     involvesMe: fig.involvesMe, isLoan: fig.isLoan, mySide: fig.mySide, malformed: fig.malformed,
-    transferFee: fig.transferFee, loanFee: fig.loanFee, salaryDelta: fig.salaryDelta,
+    transferFee: fig.transferFee, loanFee: fig.loanFee, earned: fig.earned, salaryDelta: fig.salaryDelta,
     ridersIn: fig.ridersIn || [], ridersOut: fig.ridersOut || [],
     teamA: fig.teamA, teamB: fig.teamB, dealFee: fig.dealFee, neutralType: fig.neutralType,
     lastPostUtc, updatedUtc: Date.now(),
@@ -419,6 +421,7 @@ function buildState() {
     const figures = {
       transferFee: snap?.transferFee ?? null,
       loanFee: snap?.loanFee ?? null,
+      earned: snap?.earned ?? 0, // gross cash received (for the transfer tax)
       salaryAdd: snap?.salaryDelta ?? null, // null = n/a (unknown wage)
     };
     const closeUtc = snap?.lastPostUtc != null ? snap.lastPostUtc + DEAL_MS : null;
@@ -549,16 +552,28 @@ function adminSnapshot() {
   const faFacts = [], dealFacts = [];
   for (const [id, s] of faSnap) if (s.admin) faFacts.push({ id, ...s.admin });
   for (const [id, s] of dealSnap) if (s.admin) dealFacts.push({ id, title: s.title, ...s.admin });
-  return { riders: allRiders(), teams: allTeamsFull(), faFacts, dealFacts, nowUtc: Date.now(), budgets: cfg.adminBudgets };
+  // Duplicate/reposted FA threads: keep only the authoritative auction per rider so a
+  // lone bid in a dead "Duplicate thread" isn't counted as an uncontested win.
+  return { riders: allRiders(), teams: allTeamsFull(), faFacts: dedupeAdminFaFacts(faFacts), dealFacts, nowUtc: Date.now(),
+    budgets: cfg.adminBudgets, renewals: cfg.adminRenewals, dismissedBids: cfg.adminDismissedBids };
 }
 
-// Persist an admin-entered per-team budget (keyed by normalized team name), then
-// re-push so the admin panel reflects the on-track / exceeded verdict immediately.
-async function setAdminBudget(team, amount) {
+// Persist an admin-entered per-team number (budget / renewal fines / tax), keyed by
+// normalized team name, then re-push so the admin panel recomputes immediately.
+async function setAdminNum(kind, team, amount) {
+  const map = { budget: cfg.adminBudgets, renewalFines: cfg.adminRenewals }[kind];
   const k = norm(team);
-  if (!k) return;
-  if (amount == null || amount === '' || isNaN(Number(amount))) delete cfg.adminBudgets[k];
-  else cfg.adminBudgets[k] = Number(amount);
+  if (!map || !k) return;
+  if (amount == null || amount === '' || isNaN(Number(amount))) delete map[k];
+  else map[k] = Number(amount);
+  await saveCfg();
+  refreshAdmin();
+}
+
+// Acknowledge (dismiss) a bid-limit crossing so it stops colouring the card red.
+async function setAdminDismissBid(key) {
+  if (!key) return;
+  cfg.adminDismissedBids[key] = true;
   await saveCfg();
   refreshAdmin();
 }
@@ -693,7 +708,7 @@ async function boot() {
   ui.setForumInputs(cfg.faForum, cfg.dealForum);
   ui.setDivision(cfg.division);
   ui.setMoneyInputs(cfg.baseSalary, cfg.budget, cfg.reserve);
-  setupAdmin(adminSnapshot, setAdminBudget);
+  setupAdmin(adminSnapshot, setAdminNum, setAdminDismissBid);
   render(); // show cached snapshots immediately
   // The worker's first read happens one chunk in (not on load), then it fetches
   // ~13 threads every 5s and re-renders the whole UI once per refresh window.

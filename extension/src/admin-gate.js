@@ -52,7 +52,8 @@ async function decryptBundle(codeInput, gate) {
 
 let iframe = null;
 let getSnapshot = null;
-let onSetBudget = null;
+let onSetNum = null;
+let onDismissBid = null;
 let running = false;
 
 function ensureIframe() {
@@ -121,14 +122,16 @@ async function openAdmin() {
 
 // Wire the header Admin button + tab toggle. `snapshotFn` returns the admin data;
 // `setBudget(team, amount)` persists an admin-entered per-team budget.
-export function setupAdmin(snapshotFn, setBudget) {
+export function setupAdmin(snapshotFn, setNum, dismissBid) {
   getSnapshot = snapshotFn;
-  onSetBudget = setBudget || null;
-  // messages from the sandboxed admin bundle (budgets, CSV export). The sandbox
-  // can't write config or trigger downloads itself, so it delegates to us.
+  onSetNum = setNum || null;
+  onDismissBid = dismissBid || null;
+  // messages from the sandboxed admin bundle (numeric fields, dismissals, CSV
+  // export). The sandbox can't write config or trigger downloads, so it delegates.
   window.addEventListener('message', (ev) => {
     const m = ev.data || {};
-    if (m.type === 'set-budget' && onSetBudget) onSetBudget(m.team, m.amount);
+    if (m.type === 'admin-num' && onSetNum) onSetNum(m.kind, m.team, m.amount);
+    else if (m.type === 'dismiss-bid' && onDismissBid) onDismissBid(m.key);
     else if (m.type === 'download-csv' && running && Array.isArray(m.files)) downloadFiles(m.files);
   });
   $('adminBtn').addEventListener('click', openAdmin);

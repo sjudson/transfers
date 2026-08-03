@@ -182,6 +182,33 @@ console.log('\n[dedupeFaByRider]');
   eq('null-rider threads kept separate', model.dedupeFaByRider([u1, u2]).length, 2);
 }
 
+console.log('\n[dedupeAdminFaFacts]');
+{
+  // Real repro: a rider gets a duplicate FA thread. The dead one holds a lone low bid
+  // that looks like an uncontested win; the real thread runs a bidding war another team
+  // wins. Only the authoritative (highest-bid) thread must survive per rider.
+  const facts = [
+    { id: 72952, kind: 'fa', riderName: 'Joel Yates', leaderTeam: 'Aker - Ab InBev', leaderAmount: 50000, winUtcMs: 100 },      // dead duplicate
+    { id: 72951, kind: 'fa', riderName: 'Joel Yates', leaderTeam: 'Air New Zealand-Prada', leaderAmount: 95000, winUtcMs: 200 }, // real thread
+    { id: 72830, kind: 'fa', riderName: 'Diego Pescador', leaderTeam: 'Aker - Ab InBev', leaderAmount: 50000, winUtcMs: 100 },   // dead duplicate
+    { id: 72829, kind: 'fa', riderName: 'Diego Pescador', leaderTeam: 'Peugeot', leaderAmount: 160000, winUtcMs: 300 },          // real thread
+    { id: 99, kind: 'sack', sackTeam: 'Aker - Ab InBev', sackWage: 60000, riderName: 'SackedGuy' },
+  ];
+  const out = model.dedupeAdminFaFacts(facts);
+  const byRider = (n) => out.filter((f) => f.riderName === n && f.kind === 'fa');
+  eq('one Yates fact kept', byRider('Joel Yates').length, 1);
+  eq('kept the real Yates thread (95k), not Aker 50k', byRider('Joel Yates')[0].id, 72951);
+  eq('kept the real Pescador thread (Peugeot 160k)', byRider('Diego Pescador')[0].leaderTeam, 'Peugeot');
+  ok('Aker no longer wins either free agent', !out.some((f) => f.kind === 'fa' && f.leaderTeam === 'Aker - Ab InBev'));
+  ok('sack passes through untouched', out.some((f) => f.kind === 'sack' && f.sackTeam === 'Aker - Ab InBev'));
+  // tie on leading amount → most recent win time wins
+  const tie = model.dedupeAdminFaFacts([
+    { id: 1, kind: 'fa', riderName: 'X', leaderAmount: 50000, winUtcMs: 10 },
+    { id: 2, kind: 'fa', riderName: 'X', leaderAmount: 50000, winUtcMs: 20 },
+  ]);
+  eq('tie broken by recency', tie[0].id, 2);
+}
+
 // ============================ commitments ==================================
 console.log('\n[computeTotals: salary breakdown + budget + sacks]');
 {
@@ -227,6 +254,18 @@ console.log('\n[computeTotals: salary breakdown + budget + sacks]');
   ok('seller not over budget', seller.budget.over === false);
   const over = model.computeTotals({ faItems: [{ salary: 100000, amILeading: true, completed: false }], baseSalary: '1200000', cap: 1200000 });
   eq('salary over cap flagged', over.salary.over, true);
+  // transfer tax: computed on GROSS cash received (earned), progressive over €500k/€1M.
+  eq('tax: 0 under €500k', model.transferTax(400000), 0);
+  eq('tax: 10% band (€910k → €41k)', model.transferTax(910000), 41000);
+  eq('tax: 20% band (€1.2m → €90k)', model.transferTax(1200000), 90000);
+  // a swap: gross €1.2m in AND €1.2m out (net 0) → €90k tax, excluded from base spend
+  // but counted in the over-budget check (tips 1.0m spend over a 1.05m budget).
+  const swap = model.computeTotals({ baseSalary: '1000000', budget: '1050000',
+    deals: [{ transferFee: 0, loanFee: 0, earned: 1200000, salaryAdd: 0, isLoan: false, completed: true }] });
+  eq('swap gross income tracked', swap.budget.income, 1200000);
+  eq('tax computed on gross income = €90k', swap.budget.tax, 90000);
+  eq('base spend excludes tax', swap.budget.spend, 1000000);
+  ok('tax tips spend over budget', swap.budget.over === true);
 }
 
 console.log('\n[wage bands + deal types]');
@@ -262,6 +301,19 @@ console.log('\n[wage bands + deal types]');
   ];
   eq('tie → latest post', model.winningDealPost(tie).stampStr, '28-07-2026 23:40');
   ok('no deal posts → null', model.winningDealPost([{ text: 'just a comment' }]) === null);
+  // an "overbid" only counts within 24h of the standing offer: a higher post 2 days
+  // later comes AFTER the first deal completed, so the ORIGINAL offer stands.
+  const lateOverbid = [
+    { text: war[0].text, stampStr: '28-07-2026 20:49' }, // 70k — completes 24h later
+    { text: war[2].text, stampStr: '30-07-2026 21:00' }, // 200k, but >24h later → too late
+  ];
+  eq('late overbid (>24h) ignored → original 70k post stands', model.winningDealPost(lateOverbid).stampStr, '28-07-2026 20:49');
+  // a higher post WITHIN 24h is a valid overbid and wins
+  const inTimeOverbid = [
+    { text: war[0].text, stampStr: '28-07-2026 20:49' }, // 70k
+    { text: war[2].text, stampStr: '29-07-2026 10:00' }, // 200k, within 24h → wins
+  ];
+  eq('in-time overbid (<24h) wins', model.winningDealPost(inTimeOverbid).stampStr, '29-07-2026 10:00');
 }
 
 // ============================ parse real HTML ==============================
@@ -701,6 +753,12 @@ console.log('\n[admin aggregation]');
   ok('Beta over cap committed → red', cardOf('Beta').classList.contains('red'));
   ok('Gamma bid-limit crossed → red', cardOf('Gamma').classList.contains('red'));
   ok('Gamma shows a bid-limit label', /Bid limit crossed/.test(cardOf('Gamma').textContent));
+  ok('Gamma bid-limit alert has a dismiss ✕', !!cardOf('Gamma').querySelector('.alabel-x'));
+  // dismissing the crossing drops Gamma's red and hides the alert
+  window.renderAdmin({ riders, teams, faFacts, dealFacts: [], nowUtc: now, dismissedBids: { 'gamma|2026-08-01': true } });
+  const gDis = [...document.querySelectorAll('.acard')].find((c) => c.querySelector('.aname')?.textContent === 'Gamma');
+  ok('dismissed bid-limit removes Gamma red', !gDis.classList.contains('red'));
+  ok('dismissed bid-limit hides the alert', !/Bid limit crossed/.test(gDis.textContent));
   // new team with no riders still gets its CT division/cap from the teams list
   ok('Newbie (new CT, 0 riders) shows CT division', /CT/.test(cardOf('Newbie').querySelector('.adiv').textContent));
   ok('Newbie under min (0 < 15) → yellow', cardOf('Newbie').classList.contains('yellow'));
@@ -733,7 +791,9 @@ console.log('\n[admin aggregation]');
 
   // superseded deal's fee must NOT count toward the admin budget spend (repro of
   // the "outgoing 760 vs 15" report: a 750k superseded swap was still counted)
-  const t1 = Date.UTC(2026, 6, 26, 12, 0, 0), t2 = Date.UTC(2026, 6, 27, 12, 0, 0);
+  // deal 2 reopens 6h after deal 1 — WITHIN the 24h window, so it's a renegotiation
+  // that supersedes deal 1 (not a legitimate re-trade after completion).
+  const t1 = Date.UTC(2026, 6, 26, 12, 0, 0), t2 = Date.UTC(2026, 6, 26, 18, 0, 0);
   const dealFacts = [
     { id: 1, a: { name: 'Bolt', out: ['Laurence Pithie'], in: ['Logan Owen'], moneyOut: 0, moneyIn: 750000 },
       b: { name: 'Philips', out: ['Logan Owen'], in: ['Laurence Pithie'], moneyOut: 750000, moneyIn: 0 }, isLoan: false, voided: false, opUtc: t1 },
@@ -744,20 +804,56 @@ console.log('\n[admin aggregation]');
   const pcard = [...document.querySelectorAll('.acard')].find((c) => c.querySelector('.aname')?.textContent === 'Philips');
   ok('superseded 750k swap excluded from admin spend (not over 100k budget)', !/Over budget/.test(pcard.textContent));
 
-  // net-seller budget display (Aker report): cash RECEIVED raises the budget
-  // denominator (green +), it never pulls the spend below salary.
-  const akr = [{ n: 'A1', t: 'Aker', d: 'PT', w: 3000000, j: 0, loan: 0 }]; // 3.0m salary
+  // budget REMAINING = original budget + fees earned − wages − fees spent − tax −
+  // renewal fines. Aker: budget 3.5m, wages 3.0m, sold a rider for 200k received.
+  const akr = [{ n: 'A1', t: 'Aker', d: 'PT', w: 3000000, j: 0, loan: 0 }]; // 3.0m wages
   const akd = [{ id: 5, a: { name: 'Aker', out: ['SoldGuy'], in: [], moneyOut: 0, moneyIn: 200000 },
     b: { name: 'Buyer', out: [], in: ['SoldGuy'], moneyOut: 200000, moneyIn: 0 }, isLoan: false, voided: false, opUtc: now - 3 * 24 * 3600 * 1000 }];
   window.renderAdmin({ riders: akr, teams: [{ name: 'Aker', div: 'PT' }], faFacts: [], dealFacts: akd, nowUtc: now, budgets: { aker: 3500000 } });
   const acard = [...document.querySelectorAll('.acard')].find((c) => c.querySelector('.aname')?.textContent === 'Aker');
-  ok('net-seller spend stays = salary (€3,000,000)', /€3,000,000 \//.test(acard.textContent));
-  ok('received cash raises budget denominator (+€200,000, → €3,700,000)', /€3,700,000/.test(acard.textContent) && /\+€200,000/.test(acard.textContent));
-  ok('net-seller on track, not over', /On track/.test(acard.textContent) && !/Over budget|Exceeded/.test(acard.textContent));
+  // 3,500,000 + 200,000 received − 3,000,000 wages = 700,000 remaining
+  ok('remaining = €700,000 (budget + received − wages)', /Projected remaining/.test(acard.textContent) && /€700,000/.test(acard.textContent));
+  ok('transfer-net line under remaining (+€200,000, incl. transfer/loan net)', /\(incl\. transfer\/loan net\)/.test(acard.textContent) && /\+€200,000/.test(acard.textContent));
+  ok('positive remaining is not over budget', !/Over budget/.test(acard.textContent) && !acard.classList.contains('red'));
+  // renewal fines is a further input that reduces remaining (tax is 0 here — income < €500k)
+  window.renderAdmin({ riders: akr, teams: [{ name: 'Aker', div: 'PT' }], faFacts: [], dealFacts: akd, nowUtc: now,
+    budgets: { aker: 3500000 }, renewals: { aker: 150000 } });
+  const acard2 = [...document.querySelectorAll('.acard')].find((c) => c.querySelector('.aname')?.textContent === 'Aker');
+  ok('renewal fines reduce remaining to €550,000', /€550,000/.test(acard2.textContent)); // 700k − 150k
+  eq('two numeric inputs render (budget, renewal)', acard2.querySelectorAll('.abudin').length, 2);
+  // transfer tax is COMPUTED from income received (progressive: 0/10/20% over €500k/€1M).
+  // A team selling for €1,200,000 owes 10%·500k + 20%·200k = €90,000 tax.
+  const txr = [{ n: 'T1', t: 'Taxo', d: 'PT', w: 1000000, j: 0, loan: 0 }];
+  const txd = [{ id: 6, a: { name: 'Taxo', out: ['Star'], in: [], moneyOut: 0, moneyIn: 1200000 },
+    b: { name: 'Buyer', out: [], in: ['Star'], moneyOut: 1200000, moneyIn: 0 }, isLoan: false, voided: false, opUtc: now - 3 * 24 * 3600 * 1000 }];
+  window.renderAdmin({ riders: txr, teams: [{ name: 'Taxo', div: 'PT' }], faFacts: [], dealFacts: txd, nowUtc: now, budgets: { taxo: 3000000 } });
+  const tcard = [...document.querySelectorAll('.acard')].find((c) => c.querySelector('.aname')?.textContent === 'Taxo');
+  ok('transfer tax computed (€1.2M income → €90,000 tax, incl. tax line)', /\(incl\. tax\)/.test(tcard.textContent) && /−€90,000/.test(tcard.textContent));
+  // remaining = 3,000,000 + 1,200,000 − 1,000,000 − 90,000 = 3,110,000
+  ok('tax reduces projected remaining to €3,110,000', /€3,110,000/.test(tcard.textContent));
+  // negative remaining → over budget (red)
+  window.renderAdmin({ riders: akr, teams: [{ name: 'Aker', div: 'PT' }], faFacts: [], dealFacts: [], nowUtc: now, budgets: { aker: 2500000 } });
+  const acard3 = [...document.querySelectorAll('.acard')].find((c) => c.querySelector('.aname')?.textContent === 'Aker');
+  ok('negative remaining → "Over budget by €500,000", card red', /Over budget by €500,000/.test(acard3.textContent) && acard3.classList.contains('red'));
+  // EVERY card shows the full budget picture — even with no budget entered and no trades,
+  // all three rows render (remaining as "—", transfer net + tax as €0).
+  window.renderAdmin({ riders: akr, teams: [{ name: 'Aker', div: 'PT' }], faFacts: [], dealFacts: [], nowUtc: now });
+  const acard4 = [...document.querySelectorAll('.acard')].find((c) => c.querySelector('.aname')?.textContent === 'Aker');
+  ok('bare card still shows Projected remaining / transfer net / tax rows',
+    /Projected remaining/.test(acard4.textContent) && /\(incl\. transfer\/loan net\)/.test(acard4.textContent) && /\(incl\. tax\)/.test(acard4.textContent));
+  // loan fees are real cash and must count in the admin budget net (repro of the
+  // "€15k off" Aker report: net loan fees were dropped from Projected remaining).
+  const lnd = [{ id: 7, a: { name: 'Loano', out: ['Loanee'], in: [], moneyOut: 0, moneyIn: 100000, wagePaid: 0 },
+    b: { name: 'Borrower', out: [], in: ['Loanee'], moneyOut: 100000, moneyIn: 0, wagePaid: 0 }, isLoan: true, voided: false, opUtc: now - 3 * 24 * 3600 * 1000 }];
+  window.renderAdmin({ riders: [], teams: [{ name: 'Loano', div: 'PT' }], faFacts: [], dealFacts: lnd, nowUtc: now, budgets: { loano: 1000000 } });
+  const lcard = [...document.querySelectorAll('.acard')].find((c) => c.querySelector('.aname')?.textContent === 'Loano');
+  ok('loan fee counts in net (incl. transfer/loan net +€100,000)', /\(incl\. transfer\/loan net\)/.test(lcard.textContent) && /\+€100,000/.test(lcard.textContent));
+  ok('loan fee raises projected remaining to €1,100,000', /€1,100,000/.test(lcard.textContent));
 
   // salary audit must reconcile to the card's committed salary, and a superseded
   // deal must be shown-but-excluded (the tool for debugging the "170k off" report)
-  const done3 = now - 3 * 24 * 3600 * 1000, done2 = now - 2 * 24 * 3600 * 1000;
+  // done2 reopens 6h after done3 — within the 24h window, so deal 62 supersedes 61.
+  const done3 = now - 3 * 24 * 3600 * 1000, done2 = done3 + 6 * 3600 * 1000;
   const audRiders = [
     { n: 'Base1', t: 'Audit', d: 'PT', w: 1000000, j: 0, loan: 0 },
     { n: 'KeepGuy', t: 'Seller', d: 'PT', w: 200000, j: 0, loan: 0 },
@@ -852,6 +948,24 @@ console.log('\n[supersededDealIds]');
     { threadId: 31, riders: ['B'], opUtc: 200, voided: false },
   ];
   ok('unrelated riders: neither superseded', model.supersededDealIds(indep).size === 0);
+  // a rider CAN be traded twice: a later deal that opens AFTER the first completed
+  // (>24h) is a legitimate re-trade, not a supersession — both stand.
+  const DAY = 24 * 3600 * 1000, base = 1_000_000_000;
+  const retrade = [
+    { threadId: 40, riders: ['Wout van Aert'], opUtc: base, voided: false },
+    { threadId: 41, riders: ['Wout van Aert'], opUtc: base + 3 * DAY, voided: false }, // 3 days later
+  ];
+  const rs = model.supersededDealIds(retrade);
+  ok('re-trade >24h later: first NOT superseded', !rs.has(40));
+  ok('re-trade >24h later: second NOT superseded', !rs.has(41));
+  // but a repost WITHIN 24h is a renegotiation that supersedes the first
+  const quickRe = [
+    { threadId: 42, riders: ['Wout van Aert'], opUtc: base, voided: false },
+    { threadId: 43, riders: ['Wout van Aert'], opUtc: base + 6 * 3600 * 1000, voided: false }, // 6h later
+  ];
+  const qs = model.supersededDealIds(quickRe);
+  ok('renegotiation within 24h: first superseded', qs.has(42));
+  ok('renegotiation within 24h: second stands', !qs.has(43));
 }
 
 console.log('\n[applyManualOrder]');
