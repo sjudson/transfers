@@ -314,6 +314,16 @@ console.log('\n[wage bands + deal types]');
     { text: war[2].text, stampStr: '29-07-2026 10:00' }, // 200k, within 24h → wins
   ];
   eq('in-time overbid (<24h) wins', model.winningDealPost(inTimeOverbid).stampStr, '29-07-2026 10:00');
+  // renegotiated DOWN (Frisk repro): the price drops across reposts within the window.
+  // The latest post is the live deal, so the tool must use 96k — NOT the original 125k.
+  const reneg = [
+    { text: 'Team A:Evonik\nRider Out:Frisk\nMoney In:€125,000\nTeam B:Karthago\nRider In:Frisk\nMoney Out:€125,000', stampStr: '03-08-2026 15:03' },
+    { text: 'Team A:Evonik\nRider Out:Frisk\nMoney In:€96,000\nTeam B:Karthago\nRider In:Frisk\nMoney Out:€96,000', stampStr: '03-08-2026 15:04' },
+    { text: 'Team A:Evonik\nRider Out:Frisk\nMoney In:€96,000\nTeam B:Karthago\nRider In:Frisk\nMoney Out:€96,000', stampStr: '03-08-2026 19:48' },
+  ];
+  eq('renegotiated-down: latest repost wins (19:48)', model.winningDealPost(reneg).stampStr, '03-08-2026 19:48');
+  const rf = model.dealFigures(model.winningDealText(reneg), 'Evonik', () => 55000);
+  eq('renegotiated fee is the current 96k, not original 125k', rf.transferFee, -96000); // Evonik receives 96k
 }
 
 // ============================ parse real HTML ==============================
@@ -549,6 +559,13 @@ console.log('\n[dealFigures]');
   ok('loan detected', l.isLoan === true);
   eq('loan fee (B receives 290k)', l.loanFee, -290000);
   eq('loan-in salary = wage B pays', l.salaryDelta, 20000);
+  // parseDeal captures the rider's own wage and the loan clause (for the loans export)
+  const lp = model.parseDeal(loan);
+  eq('rider wage parsed', lp.teamA.riderWage, 170000);
+  eq('wage paid by A parsed', lp.teamA.wagePaid, 150000);
+  eq('wage paid by B parsed', lp.teamB.wagePaid, 20000);
+  eq('loan clause parsed', lp.clause, 'reach level 3');
+  eq('clause line not swallowed into a rider block', lp.teamB.in.join(), 'Tobias Lund Andresen');
 
   // "---" empty-slot placeholders must not be parsed as riders (real thread 67xxx:
   // DK Žalgiris sells Moscon to Cervelo for 900k — a Buy, not a Swap, salary known)
@@ -849,6 +866,13 @@ console.log('\n[admin aggregation]');
   const lcard = [...document.querySelectorAll('.acard')].find((c) => c.querySelector('.aname')?.textContent === 'Loano');
   ok('loan fee counts in net (incl. transfer/loan net +€100,000)', /\(incl\. transfer\/loan net\)/.test(lcard.textContent) && /\+€100,000/.test(lcard.textContent));
   ok('loan fee raises projected remaining to €1,100,000', /€1,100,000/.test(lcard.textContent));
+  // roster count: a loaned-IN rider is on the borrower's active roster (an addition),
+  // symmetric with the loaned-OUT rider being a departure for the lender.
+  window.renderAdmin({ riders: [], teams: [{ name: 'Loano', div: 'PT' }, { name: 'Borrower', div: 'PT' }], faFacts: [], dealFacts: lnd, nowUtc: now, budgets: {} });
+  const lparts = [...[...document.querySelectorAll('.acard')].find((c) => c.querySelector('.aname')?.textContent === 'Loano').querySelectorAll('.abreak .apart')];
+  const bparts = [...[...document.querySelectorAll('.acard')].find((c) => c.querySelector('.aname')?.textContent === 'Borrower').querySelectorAll('.abreak .apart')];
+  ok('borrower: loaned-in rider counts as a roster addition (conf 1)', /1/.test(bparts[1].textContent));
+  ok('lender: loaned-out rider counts as a departure (dep 1)', /1/.test(lparts[3].textContent));
 
   // salary audit must reconcile to the card's committed salary, and a superseded
   // deal must be shown-but-excluded (the tool for debugging the "170k off" report)
@@ -1013,9 +1037,10 @@ console.log('\n[transaction CSV export]');
   ];
   const dealFacts = [
     { id: 601, a: { name: 'Alpha', out: ['Rider One'], in: [], moneyOut: 0, moneyIn: 200000 }, b: { name: 'Beta', out: [], in: ['Rider One'], moneyOut: 200000, moneyIn: 0 }, isLoan: false, voided: false, opUtc: done - 90000000 }, // completed transfer
-    { id: 602, a: { name: 'Alpha', out: ['L1'], in: [], moneyOut: 0, moneyIn: 50000 }, b: { name: 'Gamma', out: [], in: ['L1'], moneyOut: 50000, moneyIn: 0 }, isLoan: true, voided: false, opUtc: done - 90000000 },                     // completed loan
+    { id: 602, a: { name: 'Alpha', out: ['L1'], in: [], moneyOut: 0, moneyIn: 50000, wagePaid: 10000, riderWage: 60000 }, b: { name: 'Gamma', out: [], in: ['L1'], moneyOut: 50000, moneyIn: 0, wagePaid: 50000 }, isLoan: true, voided: false, clause: 'L1 to enjoy the year.', opUtc: done - 90000000 }, // completed loan
     { id: 603, a: { name: 'Alpha', out: ['V'], in: [] }, b: { name: 'Beta', out: [], in: ['V'] }, isLoan: false, voided: true, opUtc: done - 90000000 },                                                                                  // voided → excluded
     { id: 604, a: { name: 'Alpha', out: ['P'], in: [] }, b: { name: 'Beta', out: [], in: ['P'] }, isLoan: false, voided: false, opUtc: future },                                                                                          // not closed → excluded
+    { id: 605, a: { name: 'Delta', out: ['L2'], in: [], moneyOut: 0, moneyIn: 20000, wagePaid: 5000, riderWage: 40000 }, b: { name: 'Echo', out: [], in: ['L2'], moneyOut: 20000, moneyIn: 0, wagePaid: 35000 }, isLoan: true, voided: false, clause: '', opUtc: done - 90000000 }, // completed loan, NO clause
   ];
   const csv = window.buildTransactionCsvs({ faFacts, dealFacts, nowUtc: now });
   const lines = (s) => s.trim().split('\r\n');
@@ -1032,10 +1057,17 @@ console.log('\n[transaction CSV export]');
   ok('2nd sack (same team) fee = 2× wage', sack.some((l) => /Sacked Sue,Gamma,50000,100000,/.test(l)));
   ok('other team\'s 1st sack fee = 1× wage', sack.some((l) => /Lone Sack,Alpha,40000,40000,/.test(l)));
   eq('transfers header', tr[0], 'deal_date,type,team_a,team_b,riders_a_to_b,riders_b_to_a,transfer_fee,loan_fee,fee_paid_by,thread_url');
-  eq('2 completed deals (voided + open excluded)', tr.length, 3);
+  eq('3 completed deals (voided + open excluded)', tr.length, 4); // 601 transfer + 602/605 loans
   ok('transfer: Beta buys, so Beta pays the fee A←B', tr.some((l) => /Transfer,Alpha,Beta,Rider One,,200000,0,Beta,/.test(l)));
   ok('loan: Gamma pays the loan fee', tr.some((l) => /Loan,Alpha,Gamma,L1,,0,50000,Gamma,/.test(l)));
   ok('voided deal excluded', !csv.transfers.includes('thread_id=603'));
+  // dedicated loans export: mirrors the [Loan Deal] post (wage split + rider wage + clause)
+  const ln = lines(csv.loans);
+  eq('loans header', ln[0], 'deal_date,team_a,rider_out,rider_wage,money_out_a,money_in_a,wage_paid_a,team_b,rider_in,money_out_b,money_in_b,wage_paid_b,loan_clause,thread_url');
+  eq('two completed loans (only loans, no transfers)', ln.length, 3);
+  ok('loan row carries wage split, rider wage + clause', ln.some((l) => /Alpha,L1,60000,0,50000,10000,Gamma,L1,50000,0,50000,L1 to enjoy the year\.,/.test(l)));
+  ok('clause-less loan is still included (empty loan_clause cell)', ln.some((l) => /Delta,L2,40000,0,20000,5000,Echo,L2,20000,0,35000,,http/.test(l)));
+  ok('transfer (601) is NOT in the loans export', !csv.loans.includes('Rider One'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

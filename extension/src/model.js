@@ -280,19 +280,21 @@ function dealRiders(s) {
 
 export function parseDeal(opText) {
   const isLoan = /wage paid by|loan clause/i.test(opText || '');
-  const blk = { A: { name: '', out: [], in: [], moneyOut: 0, moneyIn: 0, wagePaid: 0 },
-                B: { name: '', out: [], in: [], moneyOut: 0, moneyIn: 0, wagePaid: 0 } };
-  let cur = null, m;
+  const blk = { A: { name: '', out: [], in: [], moneyOut: 0, moneyIn: 0, wagePaid: 0, riderWage: 0 },
+                B: { name: '', out: [], in: [], moneyOut: 0, moneyIn: 0, wagePaid: 0, riderWage: 0 } };
+  let cur = null, m, clause = '';
   for (const line of (opText || '').split('\n').map((l) => l.trim())) {
     if ((m = /^Team\s*A\s*:(.*)$/i.exec(line))) { cur = 'A'; blk.A.name = m[1].trim(); }
     else if ((m = /^Team\s*B\s*:(.*)$/i.exec(line))) { cur = 'B'; blk.B.name = m[1].trim(); }
+    else if ((m = /^Loan Clause\s*:(.*)$/i.exec(line))) { clause = m[1].trim(); cur = null; } // deal-level; ends a block
     else if (!cur) continue;
     else if ((m = /^Riders?\s*Out\s*:(.*)$/i.exec(line))) blk[cur].out = dealRiders(m[1]);
     else if ((m = /^Riders?\s*In\s*:(.*)$/i.exec(line))) blk[cur].in = dealRiders(m[1]);
+    else if ((m = /^Riders?\s*'?\s*Wage\s*:(.*)$/i.exec(line))) blk[cur].riderWage = dealMoney(m[1]); // loan: the rider's own wage
     else if ((m = /^Money\s*Out\s*:(.*)$/i.exec(line))) blk[cur].moneyOut = dealMoney(m[1]);
     else if ((m = /^Money\s*In\s*:(.*)$/i.exec(line))) blk[cur].moneyIn = dealMoney(m[1]);
     else if ((m = /^Wage paid by Team\s*[AB]\s*:(.*)$/i.exec(line))) blk[cur].wagePaid = dealMoney(m[1]);
-    else if (/^(Deal confirmed|Confirmed|Loan Clause)/i.test(line)) cur = null;
+    else if (/^(Deal confirmed|Confirmed)/i.test(line)) cur = null;
   }
   // In a two-team deal riders only move between A and B, so B's rider lines must
   // mirror A's (B.in = A.out, B.out = A.in). Threads are frequently mis-filled —
@@ -309,26 +311,23 @@ export function parseDeal(opText) {
   }
   // malformed = both sides listed riders but they didn't mirror (a genuine
   // contradiction we had to auto-correct) — worth flagging for a manual check.
-  return { teamA: blk.A, teamB: blk.B, isLoan, malformed: !mirrored && aHas && bHas };
+  return { teamA: blk.A, teamB: blk.B, isLoan, clause, malformed: !mirrored && aHas && bHas };
 }
 
-// A deal thread can be a bidding war (the price escalates across posts as teams
-// out-bid each other). The winning deal is the one that moved the most money —
-// and, on ties, the LATEST such post (the final over-the-top confirmation). We
-// return that post so callers get both its terms and its timestamp (the 24h
-// window is anchored to when the winning offer was confirmed, not the OP).
+// A deal thread's terms get reposted — a bidding war escalates the price, or the two
+// teams renegotiate it UP or DOWN. Either way the CURRENT deal is the most recent post,
+// so we take the LATEST post rather than the highest-money one (which would report a
+// stale, since-renegotiated price). A repost only supersedes the standing offer if it
+// lands WITHIN 24h of it — once that window passes, the offer completes and later posts
+// are a fresh deal, not part of this one. We return the winning post so callers get both
+// its terms and its timestamp (the 24h close is anchored to the winning post, not the OP).
 export function winningDealPost(posts) {
-  // A deal thread is an auction: a higher re-post ("overbid") only overrides the
-  // standing offer if it lands WITHIN 24h of it — before that offer completes. Once
-  // 24h pass with no higher offer, that offer wins and later posts don't count.
-  // (Stamps are compared as differences, so the tz offset cancels — use 0 here.)
   const items = [];
   for (const p of posts || []) {
     const d = parseDeal(p.text || '');
     if (!d.teamA.name || !d.teamB.name) continue;
-    const fee = Math.max(d.teamA.moneyOut || 0, d.teamA.moneyIn || 0, d.teamB.moneyOut || 0, d.teamB.moneyIn || 0);
     const ps = parseForumStamp(p.stampStr);
-    items.push({ p, fee, utc: ps ? stampToUtcMs(ps, 0) : null });
+    items.push({ p, utc: ps ? stampToUtcMs(ps, 0) : null }); // tz offset cancels in the diff → 0
   }
   if (!items.length) return null;
   // Process chronologically (by stamp when present, else stable array order).
@@ -338,7 +337,7 @@ export function winningDealPost(posts) {
   for (let k = 1; k < items.length; k++) {
     const it = items[k];
     const withinWindow = win.utc == null || it.utc == null || it.utc < win.utc + DEAL_MS;
-    if (it.fee >= win.fee && withinWindow) win = it; // >= : a later re-post wins ties
+    if (withinWindow) win = it; // the latest repost within the 24h window is the live deal
   }
   return win.p;
 }

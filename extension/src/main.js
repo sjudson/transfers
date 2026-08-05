@@ -23,7 +23,9 @@ const FA_FORUM = 396;   // [Man-Game] Transfers: Free Agents (default)
 const DEAL_FORUM = 397; // [Man-Game] Transfers: Deals (default)
 // Bump when the snapshot schema or parsing logic changes, so stale cached
 // snapshots are discarded and everything is re-read with the current code.
-const DATA_VERSION = 14; // bump to flush the HTTP cache and recover from bad-304 stale bodies
+const DATA_VERSION = 15; // bump to flush cached snapshots + HTTP cache (re-parse all threads).
+// v15: deal parser gained rider_wage/loan_clause + latest-repost winner; cached deals
+// need a re-parse to populate them (and to pick up renegotiated-down prices).
 
 // faForum/dealForum are configurable so the tool can be pointed at an old
 // season's forums for testing, or reused in future seasons, without a rebuild.
@@ -266,7 +268,7 @@ async function fetchDealThread(threadId) {
     teamA: fig.teamA, teamB: fig.teamB, dealFee: fig.dealFee, neutralType: fig.neutralType,
     lastPostUtc, updatedUtc: Date.now(),
     latestStamp: newestPostStamp(t.posts) ?? (listing.get(threadId)?.lastPostStamp ?? null),
-    admin: { a: wd.teamA, b: wd.teamB, isLoan: wd.isLoan, voided, opUtc: isFinite(lastPostUtc) ? lastPostUtc : null },
+    admin: { a: wd.teamA, b: wd.teamB, isLoan: wd.isLoan, clause: wd.clause || '', voided, opUtc: isFinite(lastPostUtc) ? lastPostUtc : null },
   });
 }
 
@@ -515,8 +517,10 @@ function buildState() {
     if (!d.isLoan) { // transfers change ownership
       for (const n of d.ridersIn) addJr(d.completed ? rb.confirmed : rb.pending, juniorByName(n));
       if (d.completed) for (const n of d.ridersOut) addJr(rb.departed, juniorByName(n));
-    } else if (d.completed) { // loan-out removes an owned rider from the count; loan-in isn't owned
-      for (const n of d.ridersOut) addJr(rb.departed, juniorByName(n));
+    } else { // loans join/leave your ACTIVE roster for the window (ownership unchanged):
+      // a loaned-IN rider you field counts as an addition, a loaned-OUT one as a departure.
+      for (const n of d.ridersIn) addJr(d.completed ? rb.confirmed : rb.pending, juniorByName(n));
+      if (d.completed) for (const n of d.ridersOut) addJr(rb.departed, juniorByName(n));
     }
   }
   for (const k of sacks) addJr(rb.departed, countsAsJunior(k.rider?.j, k.rider?.w)); // your sacks depart
