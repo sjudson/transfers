@@ -33,6 +33,12 @@ export const FIRST_WINDOW_UTC = Date.UTC(2026, 6, 24, 20 - BST_OFFSET_MIN / 60, 
 // Transfer window closes Thu 6 Aug 2026 12:00 BST (then unresolved FAs go to silent auction).
 export const TRANSFER_CLOSE_UTC = Date.UTC(2026, 7, 6, 12 - BST_OFFSET_MIN / 60, 0, 0);
 
+// A deal is closed once its 24h confirmation window elapses OR the transfer window
+// shuts — at the deadline every still-pending deal is locked in at its current terms.
+export function dealClosed(opUtc, nowUtc) {
+  return opUtc != null && (nowUtc >= opUtc + DEAL_MS || nowUtc >= TRANSFER_CLOSE_UTC);
+}
+
 export function minIncrement(cur) {
   if (cur < 100000) return 5000;
   if (cur < 300000) return 10000;
@@ -138,6 +144,7 @@ export function analyzeFreeAgentThread(posts, offsetMin, myTeam, openingMin = MI
   const myBidHigh = myBids.reduce((mx, b) => Math.max(mx, b.amount), 0) || null;
   const myInvalidHigh = (myBidHigh != null && myBidHigh > (myHighest || 0)) ? myBidHigh : null;
   const amILeading = !!(lead && nMy && norm(lead.team) === nMy);
+  const winUtcMs = lead?.utcMs != null ? lead.utcMs + WIN_MS : null;
   return {
     leadingAmount: lead?.amount ?? null,
     leadingTeam: lead?.team ?? null,
@@ -149,7 +156,11 @@ export function analyzeFreeAgentThread(posts, offsetMin, myTeam, openingMin = MI
     myBids,
     bids: bidLog, // full team-agnostic log: {utcMs, amount, team, valid}
     bidCount: bidLog.length,
-    winUtcMs: lead?.utcMs != null ? lead.utcMs + WIN_MS : null,
+    winUtcMs,
+    // Still contested at the deadline (its natural 48h win falls AFTER the window
+    // closes) → resolved by silent-bid auction, not here. The current leader is only
+    // provisional.
+    auction: winUtcMs != null && winUtcMs > TRANSFER_CLOSE_UTC,
   };
 }
 
@@ -241,6 +252,11 @@ export function faStatus(a, nowUtc) {
   if (a.winUtcMs != null && nowUtc >= a.winUtcMs) {
     // green only when YOU won them; otherwise they signed elsewhere
     return { key: a.amILeading ? 'won' : 'gone', label: `Signed to ${a.leadingTeam}` };
+  }
+  if (a.winUtcMs != null && a.winUtcMs > TRANSFER_CLOSE_UTC) {
+    // still contested at the deadline → silent-bid auction; the leader is provisional.
+    // (Derived from winUtcMs so it works on snapshots cached before the `auction` flag.)
+    return { key: 'auction', label: nowUtc >= TRANSFER_CLOSE_UTC ? 'Silent bid' : 'To auction', auction: true, leftMs: a.winUtcMs - nowUtc };
   }
   const left = a.winUtcMs - nowUtc;
   return { key: left < 6 * 3600 * 1000 ? 'closing' : 'open', label: 'Live', leftMs: left };

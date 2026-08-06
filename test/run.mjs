@@ -136,6 +136,13 @@ console.log('\n[analyzeFreeAgentThread]');
   // toward the daily limit, valid or not — the conservative reading.
   eq('bids today = all placed bids by A', u.bidsToday, 3);
   eq('riders today', u.ridersToday, 1);
+  ok('early bid resolves before window close → not an auction', a.auction === false);
+  // a valid bid whose natural 48h win lands AFTER the transfer window closes → auction
+  const late = model.analyzeFreeAgentThread([mk(A, '50.000', '05-08-2026 00:00')], 60, A);
+  ok('late bid → win after close → auction flagged', late.auction === true);
+  eq('faStatus pre-deadline → "To auction"', model.faStatus(late, Date.parse('2026-08-05T12:00:00Z')).key, 'auction');
+  eq('faStatus pre-deadline label', model.faStatus(late, Date.parse('2026-08-05T12:00:00Z')).label, 'To auction');
+  eq('faStatus post-deadline label', model.faStatus(late, Date.parse('2026-08-06T15:00:00Z')).label, 'Silent bid');
 }
 
 // ===== invalid own bid: "your bid" = highest VALID; a rejected raise is flagged =
@@ -939,6 +946,15 @@ console.log('\n[parseSackPost]');
   eq('wage 70k', s5.sackWage, 70000);
 }
 
+console.log('\n[dealClosed — pending deals lock at the window deadline]');
+{
+  const close = model.TRANSFER_CLOSE_UTC;
+  ok('open: <24h old and window still open', !model.dealClosed(close - 3600000, close - 7200000)); // posted 1h before close, now 2h before
+  ok('closed: 24h confirmation window elapsed', model.dealClosed(close - 30 * 3600000, close - 2 * 3600000));
+  ok('closed: window deadline forces a still-pending deal shut', model.dealClosed(close - 3600000, close)); // <24h old but window shut
+  ok('null opUtc is never closed', !model.dealClosed(null, close + 1e9));
+}
+
 console.log('\n[supersededDealIds]');
 {
   // Pithie chain: an early swap is superseded by later deals moving the same rider
@@ -1034,6 +1050,7 @@ console.log('\n[transaction CSV export]');
     { id: 505, kind: 'sack', riderName: 'Sacked Sam', sackTeam: 'Gamma', sackWage: 90000, sackUtcMs: done },                       // Gamma's 1st sack
     { id: 506, kind: 'sack', riderName: 'Sacked Sue', sackTeam: 'Gamma', sackWage: 50000, sackUtcMs: done + 1000 },                // Gamma's 2nd sack → 2× fee
     { id: 507, kind: 'sack', riderName: 'Lone Sack', sackTeam: 'Alpha', sackWage: 40000, sackUtcMs: done + 2000 },                 // Alpha's 1st sack → 1× fee
+    { id: 508, kind: 'fa', riderName: 'Auction Al', junior: false, leaderTeam: 'Beta', leaderAmount: 70000, winUtcMs: model.TRANSFER_CLOSE_UTC + 24 * 3600000 }, // win after window closes → auction (provisional leader)
   ];
   const dealFacts = [
     { id: 601, a: { name: 'Alpha', out: ['Rider One'], in: [], moneyOut: 0, moneyIn: 200000 }, b: { name: 'Beta', out: [], in: ['Rider One'], moneyOut: 200000, moneyIn: 0 }, isLoan: false, voided: false, opUtc: done - 90000000 }, // completed transfer
@@ -1045,13 +1062,14 @@ console.log('\n[transaction CSV export]');
   const csv = window.buildTransactionCsvs({ faFacts, dealFacts, nowUtc: now });
   const lines = (s) => s.trim().split('\r\n');
   const sign = lines(csv.signings), sack = lines(csv.sackings), tr = lines(csv.transfers);
-  eq('signings header', sign[0], 'rider,team,wage,signed_as_junior,completed_at,thread_url');
-  eq('3 completed signings (future one excluded)', sign.length, 4);
+  eq('signings header', sign[0], 'rider,team,wage,signed_as_junior,auction,completed_at,thread_url');
+  eq('4 rows: 3 completed + 1 auction (pending non-auction excluded)', sign.length, 5);
   ok('comma in team name is quoted', sign.some((l) => l.includes('"Beta, Inc"')));
-  ok('junior signed <50k flagged yes', sign.some((l) => /Jun Ior,Alpha,30000,yes,/.test(l)));
-  ok('eligible signed ≥50k flagged no', sign.some((l) => /Big Jr,Alpha,80000,no,/.test(l)));
+  ok('junior signed <50k flagged yes, auction=no', sign.some((l) => /Jun Ior,Alpha,30000,yes,no,/.test(l)));
+  ok('eligible signed ≥50k flagged no', sign.some((l) => /Big Jr,Alpha,80000,no,no,/.test(l)));
   ok('signing carries a thread link', sign.some((l) => l.includes('viewthread.php?thread_id=501')));
-  ok('in-progress signing (504) excluded', !csv.signings.includes('Notyet'));
+  ok('in-progress non-auction signing (504) excluded', !csv.signings.includes('Notyet'));
+  ok('auction FA flagged (auction=yes, no completion date)', sign.some((l) => /Auction Al,Beta,70000,no,yes,,http/.test(l)));
   eq('sackings header', sack[0], 'rider,team,wage_freed,sack_fee,sacked_at,thread_url');
   ok('1st sack fee = 1× wage', sack.some((l) => /Sacked Sam,Gamma,90000,90000,.*thread_id=505/.test(l)));
   ok('2nd sack (same team) fee = 2× wage', sack.some((l) => /Sacked Sue,Gamma,50000,100000,/.test(l)));

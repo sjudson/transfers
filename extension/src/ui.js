@@ -414,6 +414,11 @@ function faCard(f, s) {
     const closed = f.status && (f.status.key === 'won' || f.status.key === 'gone');
     if (closed) {
       stWrap.append(badge(f.status.key, f.status.label));
+    } else if (f.status && f.status.key === 'auction') {
+      // won't self-resolve — it goes to the silent-bid auction at the deadline
+      const b = badge('auction', f.status.label);
+      b.title = 'Still contested at the deadline — resolved by silent-bid auction; the leader shown is provisional.';
+      stWrap.append(b);
     } else if (f.a.winUtcMs) {
       stWrap.append(countdownEl('closes in ', f.a.winUtcMs, s.nowUtc));
     } else if (f.status) {

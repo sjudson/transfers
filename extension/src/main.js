@@ -12,7 +12,7 @@ import {
 } from './ridersdb.js';
 import { setupAdmin, refreshAdmin } from './admin-gate.js';
 import {
-  analyzeFreeAgentThread, faStatus, dailyUsage, computeTotals, dealFigures, winningDealPost, supersededDealIds, dedupeFaByRider, dedupeAdminFaFacts, parseSackPost,
+  analyzeFreeAgentThread, faStatus, dailyUsage, computeTotals, dealFigures, winningDealPost, supersededDealIds, dedupeFaByRider, dedupeAdminFaFacts, parseSackPost, dealClosed,
   openingMinFor, faThreadKind, fmtBand, dealType, rosterCounts, parseDeal, countsAsJunior, applyManualOrder,
   JUNIOR_MIN, MIN_WAGE, DEAL_MS, FIRST_WINDOW_UTC, TRANSFER_CLOSE_UTC,
 } from './model.js';
@@ -227,7 +227,7 @@ async function fetchFaThread(threadId) {
     // fallback for riders not in the bundled DB. (The 50k-ceiling promotion is
     // applied at roster-count time, where the winning amount is known.)
     junior: rider ? !!rider.j : kind === 'junior',
-    leaderTeam: analysis.leadingTeam, leaderAmount: analysis.leadingAmount, winUtcMs: analysis.winUtcMs,
+    leaderTeam: analysis.leadingTeam, leaderAmount: analysis.leadingAmount, winUtcMs: analysis.winUtcMs, auction: !!analysis.auction,
     sackTeam: rec.sackTeam || null, sackWage: rec.sackWage || 0, sackUtcMs: rec.sackTimeUtc || null, // for [Sack] threads
     bids: analysis.bids.map((b) => ({ t: b.team, u: b.utcMs })).filter((b) => b.t && b.u != null),
   };
@@ -439,7 +439,7 @@ function buildState() {
       involvesMe, isLoan, type, voided: !!snap?.voided, superseded: supersededIds.has(threadId), malformed: !!snap?.malformed, mySide: snap?.mySide || null,
       ridersIn: snap?.ridersIn || [], ridersOut: snap?.ridersOut || [],
       teams: [snap?.teamA, snap?.teamB].filter(Boolean),
-      lastPostUtc: snap?.lastPostUtc, closeUtc, completed: closeUtc != null && nowUtc >= closeUtc,
+      lastPostUtc: snap?.lastPostUtc, closeUtc, completed: dealClosed(snap?.lastPostUtc, nowUtc),
       figures, display,
     });
   };
@@ -558,7 +558,7 @@ function adminSnapshot() {
   for (const [id, s] of dealSnap) if (s.admin) dealFacts.push({ id, title: s.title, ...s.admin });
   // Duplicate/reposted FA threads: keep only the authoritative auction per rider so a
   // lone bid in a dead "Duplicate thread" isn't counted as an uncontested win.
-  return { riders: allRiders(), teams: allTeamsFull(), faFacts: dedupeAdminFaFacts(faFacts), dealFacts, nowUtc: Date.now(),
+  return { riders: allRiders(), teams: allTeamsFull(), faFacts: dedupeAdminFaFacts(faFacts), dealFacts, nowUtc: Date.now(), transferCloseUtc: TRANSFER_CLOSE_UTC,
     budgets: cfg.adminBudgets, renewals: cfg.adminRenewals, dismissedBids: cfg.adminDismissedBids };
 }
 
